@@ -66,18 +66,18 @@ jobs:
         git clone $REPO_URL -b $REPO_BRANCH openwrt
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
     
-    - name: Install Go 1.26 toolchain
-      run: |
-        GO_VER=1.26.5   # 与 feeds 里 golang1.26 接近即可，可按需改
-        curl -fsSL "https://go.dev/dl/go${GO_VER}.linux-amd64.tar.gz" -o /tmp/go.tgz
-        sudo rm -rf /usr/local/go
-        sudo tar -C /usr/local -xzf /tmp/go.tgz
-        echo "/usr/local/go/bin" >> $GITHUB_PATH
-        export PATH="/usr/local/go/bin:$PATH"
-        go version
+    #- name: Install Go 1.26 toolchain
+      #run: |
+        #GO_VER=1.26.5   # 与 feeds 里 golang1.26 接近即可，可按需改
+        #curl -fsSL "https://go.dev/dl/go${GO_VER}.linux-amd64.tar.gz" -o /tmp/go.tgz
+        #sudo rm -rf /usr/local/go
+        #sudo tar -C /usr/local -xzf /tmp/go.tgz
+        #echo "/usr/local/go/bin" >> $GITHUB_PATH
+        #export PATH="/usr/local/go/bin:$PATH"
+        #go version
         # 确认是完整 GOROOT（要有 bin/go）
-        test -x /usr/local/go/bin/go
-        ls /usr/local/go/bin/go
+        #test -x /usr/local/go/bin/go
+        #ls /usr/local/go/bin/go
         
     # 1. 必须先用 apt 安装系统级的 ccache 工具！
     - name: Install Ccache host tool
