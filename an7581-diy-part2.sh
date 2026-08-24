@@ -89,7 +89,6 @@ exit 0
 EOF
 chmod +x files/etc/uci-defaults/99-fix-wan-mac
 
-
 # ------------------------------------------------------------
 # 3. 集成 Airoha NPU 控制插件 (luci-app-airoha-npu)
 # ------------------------------------------------------------
@@ -102,21 +101,29 @@ sed -i 's|include ../../luci.mk|include $(TOPDIR)/feeds/luci/luci.mk|' package/l
 echo "CONFIG_PACKAGE_luci-app-airoha-npu=y" >> .config
 
 # ------------------------------------------------------------
-# 修补 rpcd 后端脚本：从 dmesg 动态提取 NPU 版本
+# 修补 rpcd 后端脚本：使用 awk 替换
 # ------------------------------------------------------------
 TARGET_RPC=$(find package/luci-app-airoha-npu/ -name "luci.airoha_npu" 2>/dev/null | head -n 1)
 if [ -n "$TARGET_RPC" ] && [ -f "$TARGET_RPC" ]; then
     echo ">>> 正在修补 RPC 目标文件: $TARGET_RPC"
 
-    # 定义动态提取命令
-    dynamic_cmd='$(dmesg | grep "NPU fw version" | tail -1 | sed -n "s/.*NPU fw version: \([0-9.]*\).*/\1/p")'
+    # 使用 awk 替换 npu_ver 行（更安全，不受特殊字符影响）
+    awk -i inplace '
+    /^[[:space:]]*npu_ver[[:space:]]*=/ {
+        print "npu_ver=\"$(dmesg | grep \"NPU fw version\" | tail -1 | sed -n '\''s/.*NPU fw version: \\([0-9.]*\\).*/\\1/p'\'')\""
+        next
+    }
+    { print }
+    ' "$TARGET_RPC"
 
-    # 方法1：直接查找包含 "npu_ver" 和 "=" 的行，整行替换
-    # 匹配模式：npu_ver = "..." 或 npu_ver = '...'
-    sed -i "s|^[[:space:]]*npu_ver[[:space:]]*=[[:space:]]*[\"'][^\"']*[\"']|    npu_ver = \"$dynamic_cmd\"|" "$TARGET_RPC"
-
-    # 方法2：同样处理 version
-    sed -i "s|^[[:space:]]*version[[:space:]]*=[[:space:]]*[\"'][^\"']*[\"']|    version = \"$dynamic_cmd\"|" "$TARGET_RPC"
+    # 同时处理 version 变量（如果存在）
+    awk -i inplace '
+    /^[[:space:]]*version[[:space:]]*=/ {
+        print "version=\"$(dmesg | grep \"NPU fw version\" | tail -1 | sed -n '\''s/.*NPU fw version: \\([0-9.]*\\).*/\\1/p'\'')\""
+        next
+    }
+    { print }
+    ' "$TARGET_RPC"
 
     # 清除可能残留的硬编码数字
     sed -i '/1456.62/d' "$TARGET_RPC"
