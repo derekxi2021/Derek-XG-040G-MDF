@@ -218,28 +218,32 @@ EOF
 echo ">>> [DIY-P2] 修复完成！CPU/Temp 插件与温度节点映射均已配置完毕。"
 
 # =========================================================
-# 禁用官方 v2ray-geoip/geosite 包（使用手动下载的完整版）
+# 下载 Loyalsoldier 完整规则（覆盖官方包）
 # =========================================================
-echo ">>> 禁用官方 v2ray-geoip/geosite 包..."
-sed -i '/CONFIG_PACKAGE_v2ray-geoip/d' .config
-sed -i '/CONFIG_PACKAGE_v2ray-geosite/d' .config
-echo "# CONFIG_PACKAGE_v2ray-geoip is not set" >> .config
-echo "# CONFIG_PACKAGE_v2ray-geosite is not set" >> .config
+echo ">>> 正在下载 Loyalsoldier 完整规则文件..."
 
-# =========================================================
-# 自动拉取 Loyalsoldier 最新 geosite/geoip 规则并注入固件
-# =========================================================
-echo ">>> 正在从 github.com/Loyalsoldier 下载最新的 geosite / geoip 数据库..."
-
-# 1. 清理并重新创建 v2ray 目标文件夹
+# 1. 清理旧目录并创建新目录
 rm -rf files/usr/share/xray files/usr/share/v2ray
 mkdir -p files/usr/share/v2ray/
 
-# 2. 从 github 下载最新数据库（Loyalsoldier 的规则比官方更全）
+# 2. 下载 Loyalsoldier 规则（覆盖官方包的规则文件）
 wget -qO files/usr/share/v2ray/geosite.dat https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat
 wget -qO files/usr/share/v2ray/geoip.dat https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat
 
-echo ">>> 最新 geosite / geoip 数据库注入完成！"
+# 3. 同时创建 xray 目录的软链接（让 Xray/Sing-Box 也能找到）
+mkdir -p files/usr/share/xray
+ln -sf ../v2ray/geosite.dat files/usr/share/xray/geosite.dat 2>/dev/null || true
+ln -sf ../v2ray/geoip.dat files/usr/share/xray/geoip.dat 2>/dev/null || true
+
+# 4. 检查下载是否成功
+if [ -f files/usr/share/v2ray/geosite.dat ] && [ -f files/usr/share/v2ray/geoip.dat ]; then
+    echo ">>> ✅ 规则文件下载成功："
+    ls -lh files/usr/share/v2ray/*.dat
+else
+    echo "⚠️ 警告：规则文件下载失败，请检查网络"
+fi
+
+echo ">>> 规则文件注入完成（已覆盖官方包）"
 
 # =========================================================
 # 修正 Airoha PPE debugfs 路径匹配 (加在文件最末尾)
