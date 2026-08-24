@@ -261,10 +261,10 @@ find package/ -type f \( -name "*.lua" -o -name "*.js" -o -name "*.sh" -o -name 
     
 # set golang version：
 
-echo ">>> 配置 OpenWrt 使用 feed 内 Go 工具链（自举）..."
+#echo ">>> 配置 OpenWrt 使用 feed 内 Go 工具链（自举）..."
 # set golang 1.26.x （rc/beta）
-rm -rf feeds/packages/lang/golang
-git clone https://github.com/kenzok8/golang -b 1.26 feeds/packages/lang/golang
+#rm -rf feeds/packages/lang/golang
+#git clone https://github.com/kenzok8/golang -b 1.26 feeds/packages/lang/golang
 
 # set golang 1.25.x
 #rm -rf feeds/packages/lang/golang
