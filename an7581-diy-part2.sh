@@ -259,12 +259,24 @@ find package/ -type f \( -name "*.lua" -o -name "*.js" -o -name "*.sh" -o -name 
 find package/ -type f \( -name "*.lua" -o -name "*.js" -o -name "*.sh" -o -name "*.c" \) \
     -exec sed -i 's/\/sys\/kernel\/debug\/ppe0\/entries/\/sys\/kernel\/debug\/ppe\/entries/g' {} +
     
-# 在 diy-part2.sh 中，把之前配置外部 Go 的几行改成下面这样：
+# set golang version：
+
 echo ">>> 配置 OpenWrt 使用 feed 内 Go 工具链（自举）..."
-sed -i '/CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT/d' .config
-sed -i '/CONFIG_USE_EXTERNAL_HOST_GOLANG/d' .config
-# 启用自举模式（让 OpenWrt 自己编译 Go）
-echo "CONFIG_GOLANG_BUILD_BOOTSTRAP=y" >> .config
+# set golang 1.26.x （rc/beta）
+rm -rf feeds/packages/lang/golang
+git clone https://github.com/kenzok8/golang -b 1.26 feeds/packages/lang/golang
+
+# set golang 1.25.x
+#rm -rf feeds/packages/lang/golang
+#git clone https://github.com/kenzok8/golang -b 1.25 feeds/packages/lang/golang
+
+# set golang 1.24.x (main)
+#rm -rf feeds/packages/lang/golang
+#git clone https://github.com/kenzok8/golang feeds/packages/lang/golang
+
+# set golang 1.23.x
+#rm -rf feeds/packages/lang/golang
+#git clone https://github.com/kenzok8/golang -b 1.23 feeds/packages/lang/golang
 
 echo "========================================="
 echo ">>> diy-part2.sh 全部执行完毕！"
