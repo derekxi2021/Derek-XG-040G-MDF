@@ -108,14 +108,17 @@ TARGET_RPC=$(find package/luci-app-airoha-npu/ -name "luci.airoha_npu" 2>/dev/nu
 if [ -n "$TARGET_RPC" ] && [ -f "$TARGET_RPC" ]; then
     echo ">>> 正在修补 RPC 目标文件: $TARGET_RPC"
 
-    # 使用单引号包裹，内部双引号无需转义，更清晰
-    # 替换 npu_ver = "..." 或 npu_ver = '...'
-    sed -i 's|\(npu_ver\s*=\s*\)["'\'']\{1\}[^"'\'']*["'\'']\{1\}|\1"$(dmesg | grep "NPU fw version" | tail -1 | sed -n "s/.*NPU fw version: \([0-9.]*\).*/\1/p")"|' "$TARGET_RPC"
+    # 定义动态提取命令
+    dynamic_cmd='$(dmesg | grep "NPU fw version" | tail -1 | sed -n "s/.*NPU fw version: \([0-9.]*\).*/\1/p")'
 
-    # 替换 version = "..." 或 version = '...'
-    sed -i 's|\(version\s*=\s*\)["'\'']\{1\}[^"'\'']*["'\'']\{1\}|\1"$(dmesg | grep "NPU fw version" | tail -1 | sed -n "s/.*NPU fw version: \([0-9.]*\).*/\1/p")"|' "$TARGET_RPC"
+    # 方法1：直接查找包含 "npu_ver" 和 "=" 的行，整行替换
+    # 匹配模式：npu_ver = "..." 或 npu_ver = '...'
+    sed -i "s|^[[:space:]]*npu_ver[[:space:]]*=[[:space:]]*[\"'][^\"']*[\"']|    npu_ver = \"$dynamic_cmd\"|" "$TARGET_RPC"
 
-    # 清除可能残留的硬编码数字（如 1456.62）
+    # 方法2：同样处理 version
+    sed -i "s|^[[:space:]]*version[[:space:]]*=[[:space:]]*[\"'][^\"']*[\"']|    version = \"$dynamic_cmd\"|" "$TARGET_RPC"
+
+    # 清除可能残留的硬编码数字
     sed -i '/1456.62/d' "$TARGET_RPC"
 
     echo ">>> NPU 版本提取修补完成（动态从 dmesg 获取）"
