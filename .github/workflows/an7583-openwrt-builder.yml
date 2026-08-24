@@ -66,18 +66,18 @@ jobs:
         git clone $REPO_URL -b $REPO_BRANCH openwrt
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
     
-    - name: Install Go 1.26 toolchain
-      run: |
-        GO_VER=1.26.5   # 与 feeds 里 golang1.26 接近即可，可按需改
-        curl -fsSL "https://go.dev/dl/go${GO_VER}.linux-amd64.tar.gz" -o /tmp/go.tgz
-        sudo rm -rf /usr/local/go
-        sudo tar -C /usr/local -xzf /tmp/go.tgz
-        echo "/usr/local/go/bin" >> $GITHUB_PATH
-        export PATH="/usr/local/go/bin:$PATH"
-        go version
+    #- name: Install Go 1.26 toolchain
+      #run: |
+        #GO_VER=1.26.5   # 与 feeds 里 golang1.26 接近即可，可按需改
+        #curl -fsSL "https://go.dev/dl/go${GO_VER}.linux-amd64.tar.gz" -o /tmp/go.tgz
+        #sudo rm -rf /usr/local/go
+        #sudo tar -C /usr/local -xzf /tmp/go.tgz
+        #echo "/usr/local/go/bin" >> $GITHUB_PATH
+        #export PATH="/usr/local/go/bin:$PATH"
+        #go version
         # 确认是完整 GOROOT（要有 bin/go）
-        test -x /usr/local/go/bin/go
-        ls /usr/local/go/bin/go
+        #test -x /usr/local/go/bin/go
+        #ls /usr/local/go/bin/go
         
     # 1. 必须先用 apt 安装系统级的 ccache 工具！
     - name: Install Ccache host tool
@@ -141,41 +141,37 @@ jobs:
       id: package
       run: |
         cd openwrt
-        #make defconfig
-        export PATH="/usr/local/go/bin:$PATH"
-        export GOROOT=/usr/local/go
-      
+    
+        # 启用 ccache
         echo "CONFIG_CCACHE=y" >> .config
-        
-        # 外部 Go 1.26 根目录（官方 tarball 解压位置）
+    
+        # =========================================================
+        # Go 配置：使用 OpenWrt 内部 Go（不依赖外部）
+        # =========================================================
+        echo ">>> 配置使用 OpenWrt 内部 Go..."
+    
+        # 确保不使用外部 Go
+        sed -i '/CONFIG_USE_EXTERNAL_HOST_GOLANG/d' .config
+        echo "# CONFIG_USE_EXTERNAL_HOST_GOLANG is not set" >> .config
+    
+        # 确保不设置外部 Go 路径
         sed -i '/CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT/d' .config
-        echo 'CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT="/usr/local/go"' >> .config
-        
-        # 若 Kconfig 里有该选项：尽量不本地编 bootstrap
+        echo "# CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT is not set" >> .config
+    
+        # 启用内部 Go 编译（bootstrap）
         sed -i '/CONFIG_GOLANG_BUILD_BOOTSTRAP/d' .config
-        echo '# CONFIG_GOLANG_BUILD_BOOTSTRAP is not set' >> .config
-        
-        # 旧选项可留可不留，不能替代上面两项
-        echo 'CONFIG_USE_EXTERNAL_HOST_GOLANG=y' >> .config
-        
-        make defconfig
-        
-        # defconfig 可能冲掉字符串选项，再写一次
-        sed -i '/CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT/d' .config
-        echo 'CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT="/usr/local/go"' >> .config
-        sed -i '/CONFIG_GOLANG_BUILD_BOOTSTRAP/d' .config
-        echo '# CONFIG_GOLANG_BUILD_BOOTSTRAP is not set' >> .config
-        make defconfig
-        
-        echo ">>> Go bootstrap 相关配置："
-        grep -E 'GOLANG_EXTERNAL_BOOTSTRAP|GOLANG_BUILD_BOOTSTRAP|USE_EXTERNAL_HOST_GOLANG' .config || true
-        /usr/local/go/bin/go version
-
-        # 不要 EXTERNAL_HOST_RUST
+        echo "CONFIG_GOLANG_BUILD_BOOTSTRAP=y" >> .config
+    
+        # =========================================================
+        # Rust 配置：禁用外部 Rust，禁用 SS-Rust
+        # =========================================================
+        echo ">>> 禁用 Rust 相关..."
         sed -i '/CONFIG_USE_EXTERNAL_HOST_RUST/d' .config
         echo "# CONFIG_USE_EXTERNAL_HOST_RUST is not set" >> .config
-
-        # 强制选中你真正需要的包（不要 shadowsocks-rust-*）
+    
+        # =========================================================
+        # 强制选中需要的包
+        # =========================================================
         for pkg in \
           airoha-en7581-npu-firmware \
           luci-app-airoha-npu \
@@ -187,10 +183,15 @@ jobs:
           sed -i "s/# CONFIG_PACKAGE_${pkg} is not set/CONFIG_PACKAGE_${pkg}=y/" .config 2>/dev/null || true
           grep -q "CONFIG_PACKAGE_${pkg}=y" .config || echo "CONFIG_PACKAGE_${pkg}=y" >> .config
         done
-
+    
+        # =========================================================
+        # 生成配置
+        # =========================================================
         make defconfig
-
-        # ★ 关键：defconfig 后再次强制关掉 SS-Rust（aarch64 默认会打开）
+    
+        # =========================================================
+        # 强制关闭 SS-Rust（defconfig 可能会重新选中）
+        # =========================================================
         for opt in \
           luci-app-passwall2_INCLUDE_Shadowsocks_Rust_Client \
           luci-app-passwall2_INCLUDE_Shadowsocks_Rust_Server \
@@ -203,11 +204,11 @@ jobs:
           sed -i "/CONFIG_PACKAGE_${opt}/d" .config
           echo "# CONFIG_PACKAGE_${opt} is not set" >> .config
         done
-        sed -i '/CONFIG_USE_EXTERNAL_HOST_RUST/d' .config
-        echo "# CONFIG_USE_EXTERNAL_HOST_RUST is not set" >> .config
-
-        # 再跑一次 defconfig，然后若又被 select 拉回，再关一次
+    
+        # 再次 defconfig 确认
         make defconfig
+    
+        # 再次关闭可能被重新选中的 SS-Rust
         for opt in \
           luci-app-passwall2_INCLUDE_Shadowsocks_Rust_Client \
           luci-app-passwall2_INCLUDE_Shadowsocks_Rust_Server \
@@ -220,21 +221,19 @@ jobs:
           sed -i "/CONFIG_PACKAGE_${opt}/d" .config
           echo "# CONFIG_PACKAGE_${opt} is not set" >> .config
         done
-
+    
+        # =========================================================
+        # 诊断输出
+        # =========================================================
+        echo "========== Go 配置确认 =========="
+        grep -E 'GOLANG_EXTERNAL_BOOTSTRAP|GOLANG_BUILD_BOOTSTRAP|USE_EXTERNAL_HOST_GOLANG' .config || true
+    
         echo "========== Rust / SS-Rust 诊断 =========="
         grep -E 'Shadowsocks_Rust|shadowsocks-rust|EXTERNAL_HOST_RUST|PACKAGE_rust' .config || true
-        echo "========================================="
-
-        # ★ 最后一次 defconfig 之后，再次固定 Go 外部引导（防止被冲掉）
-        sed -i '/CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT/d' .config
-        echo 'CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT="/usr/local/go"' >> .config
-        sed -i '/CONFIG_GOLANG_BUILD_BOOTSTRAP/d' .config
-        echo '# CONFIG_GOLANG_BUILD_BOOTSTRAP is not set' >> .config
-
-        echo ">>> 最终 Go 配置确认："
-        grep -E 'GOLANG_EXTERNAL_BOOTSTRAP|GOLANG_BUILD_BOOTSTRAP|USE_EXTERNAL_HOST_GOLANG' .config || true
-        /usr/local/go/bin/go version
-        
+    
+        # =========================================================
+        # 下载源码
+        # =========================================================
         make download -j8
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
@@ -267,11 +266,6 @@ jobs:
       id: compile
       run: |
         cd openwrt
-
-        # 0. Go 1.26（与 Install Go 1.26 toolchain 步骤配合）
-        export PATH="/usr/local/go/bin:/usr/lib/ccache:$PATH"
-        export GOROOT=/usr/local/go
-        go version
 
         # 1. Ccache
         export CCACHE_DIR=/home/runner/.ccache
