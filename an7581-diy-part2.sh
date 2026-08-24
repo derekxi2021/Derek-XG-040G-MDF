@@ -218,32 +218,37 @@ EOF
 echo ">>> [DIY-P2] 修复完成！CPU/Temp 插件与温度节点映射均已配置完毕。"
 
 # =========================================================
-# 下载 Loyalsoldier 完整规则（覆盖官方包）
+# 下载 Loyalsoldier 完整规则（覆盖官方包，保留编译依赖）
 # =========================================================
 echo ">>> 正在下载 Loyalsoldier 完整规则文件..."
+
+# 注意：不删除/禁用 CONFIG_PACKAGE_v2ray-geoip 和 v2ray-geosite
+# 因为 sing-box 和 xray 编译时需要它们作为依赖
+# 但运行时，我们的 files/ 目录会覆盖官方规则文件
 
 # 1. 清理旧目录并创建新目录
 rm -rf files/usr/share/xray files/usr/share/v2ray
 mkdir -p files/usr/share/v2ray/
+mkdir -p files/usr/share/xray
 
-# 2. 下载 Loyalsoldier 规则（覆盖官方包的规则文件）
+# 2. 下载 Loyalsoldier 规则（比官方更全）
 wget -qO files/usr/share/v2ray/geosite.dat https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat
 wget -qO files/usr/share/v2ray/geoip.dat https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat
 
-# 3. 同时创建 xray 目录的软链接（让 Xray/Sing-Box 也能找到）
-mkdir -p files/usr/share/xray
+# 3. 为 xray 创建软链接（同一份文件供两个工具使用）
 ln -sf ../v2ray/geosite.dat files/usr/share/xray/geosite.dat 2>/dev/null || true
 ln -sf ../v2ray/geoip.dat files/usr/share/xray/geoip.dat 2>/dev/null || true
 
-# 4. 检查下载是否成功
+# 4. 验证下载
 if [ -f files/usr/share/v2ray/geosite.dat ] && [ -f files/usr/share/v2ray/geoip.dat ]; then
-    echo ">>> ✅ 规则文件下载成功："
-    ls -lh files/usr/share/v2ray/*.dat
+    echo ">>> ✅ 规则文件下载成功，文件大小："
+    du -sh files/usr/share/v2ray/*.dat
 else
-    echo "⚠️ 警告：规则文件下载失败，请检查网络"
+    echo "⚠️ 警告：规则文件下载失败，请检查网络！"
+    echo ">>> 将使用官方包自带的规则文件作为备选"
 fi
 
-echo ">>> 规则文件注入完成（已覆盖官方包）"
+echo ">>> 规则文件注入完成"
 
 # =========================================================
 # 修正 Airoha PPE debugfs 路径匹配 (加在文件最末尾)
