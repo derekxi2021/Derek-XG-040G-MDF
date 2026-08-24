@@ -68,7 +68,7 @@ jobs:
     
     - name: Install Go 1.26 toolchain
       run: |
-       GO_VER=1.26.5   # 与 feeds 里 golang1.26 接近即可，可按需改
+        GO_VER=1.26.5   # 与 feeds 里 golang1.26 接近即可，可按需改
         curl -fsSL "https://go.dev/dl/go${GO_VER}.linux-amd64.tar.gz" -o /tmp/go.tgz
         sudo rm -rf /usr/local/go
         sudo tar -C /usr/local -xzf /tmp/go.tgz
