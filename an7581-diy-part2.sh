@@ -258,7 +258,13 @@ find package/ -type f \( -name "*.lua" -o -name "*.js" -o -name "*.sh" -o -name 
 
 find package/ -type f \( -name "*.lua" -o -name "*.js" -o -name "*.sh" -o -name "*.c" \) \
     -exec sed -i 's/\/sys\/kernel\/debug\/ppe0\/entries/\/sys\/kernel\/debug\/ppe\/entries/g' {} +
-    
+
+# =========================================================
+# 强制使用外部 Go（系统安装的 Go 1.26.5）
+# =========================================================
+echo ">>> 强制使用外部 Go..."
+sed -i '/CONFIG_USE_EXTERNAL_HOST_GOLANG/d' .config
+echo "CONFIG_USE_EXTERNAL_HOST_GOLANG=y" >> .config
 # set golang version：
 
 #echo ">>> 配置 OpenWrt 使用 feed 内 Go 工具链（自举）..."
