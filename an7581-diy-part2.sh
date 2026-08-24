@@ -245,6 +245,44 @@ find package/ -type f \( -name "*.lua" -o -name "*.js" -o -name "*.sh" -o -name 
 find package/ -type f \( -name "*.lua" -o -name "*.js" -o -name "*.sh" -o -name "*.c" \) \
     -exec sed -i 's/\/sys\/kernel\/debug\/ppe0\/entries/\/sys\/kernel\/debug\/ppe\/entries/g' {} +
 
+# ============================================================
+# sing-box go依赖错误补丁：钉死 sing-box 版本，避开 Go1.27 + json 编译错误
+# 错误：go-json-experiment/json undefined: json.SkipFunc / DiscardUnknownMembers
+# 原因：feeds 里 sing-box 1.13.18 与 Go 1.27 默认 jsonv2 不兼容
+# 处理：回退到 OpenWrt packages 曾用的 1.12.22
+# ============================================================
+echo ">>> [DIY-P2] 正在将 sing-box 固定为 1.12.22（修复 Go1.27 编译失败）..."
+
+SINGBOX_MK=""
+for p in \
+  feeds/packages/net/sing-box/Makefile \
+  package/feeds/packages/net/sing-box/Makefile
+do
+  [ -f "$p" ] && SINGBOX_MK="$p" && break
+done
+
+if [ -z "$SINGBOX_MK" ]; then
+  echo "⚠️ 未找到 sing-box Makefile，跳过版本固定"
+else
+  echo ">>> 目标 Makefile: $SINGBOX_MK"
+
+  # 固定版本与官方 tar 包 hash（openwrt/packages 升 1.13.18 前的 1.12.22）
+  sed -i 's/^PKG_VERSION:=.*/PKG_VERSION:=1.12.22/' "$SINGBOX_MK"
+  sed -i 's/^PKG_RELEASE:=.*/PKG_RELEASE:=1/' "$SINGBOX_MK"
+  sed -i 's/^PKG_HASH:=.*/PKG_HASH:=6c4333c3f53a07cc96b63a801fdf6c156820d51cd2eb05e44ea78df290a45377/' "$SINGBOX_MK"
+
+  echo ">>> 修改后版本字段："
+  grep -E '^PKG_VERSION|^PKG_RELEASE|^PKG_HASH|^PKG_SOURCE_URL' "$SINGBOX_MK" || true
+
+  # 清掉可能已缓存的 1.13.x / 坏 json 模块，强制按新版本下载
+  rm -rf dl/sing-box-1.13.* dl/sing-box-1.12.* 2>/dev/null || true
+  rm -rf dl/go-mod-cache/github.com/go-json-experiment 2>/dev/null || true
+  rm -rf tmp/go-build 2>/dev/null || true
+  rm -rf build_dir/target-*/sing-box-* 2>/dev/null || true
+
+  echo ">>> sing-box 已固定为 1.12.22，并清理相关缓存"
+fi
+
 echo "========================================="
 echo ">>> diy-part2.sh 全部执行完毕！"
 echo "========================================="
