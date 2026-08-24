@@ -30,51 +30,64 @@ echo ">>> [2/5] 正在配置 WAN MAC 地址 +1 初始化规则..."
 # 创建 uci-defaults 目录
 mkdir -p files/etc/uci-defaults
 
-echo ">>> [2/5] 正在配置 WAN MAC 地址 +1 初始化规则..."
-
-# 创建 uci-defaults 目录
-mkdir -p files/etc/uci-defaults
-
 cat << 'EOF' > files/etc/uci-defaults/99-fix-wan-mac
 #!/bin/sh
 
-# 1. 安全检查：如果检测到已有网络配置（说明是保留配置升级上来的），直接退出不干预
-if uci -q get network.wan.proto >/dev/null; then
+# 检查当前 WAN 配置是否存在且设备有效
+wan_device=$(uci -q get network.wan.device)
+if [ -n "$wan_device" ] && [ -e "/sys/class/net/$wan_device" ]; then
+    # 配置存在且设备存在 → 保留用户自定义设置，直接退出
     exit 0
 fi
 
-# 2. 抓取 lan1 节点的原始物理 MAC
-lan_mac=$(cat /sys/class/net/lan1/address 2>/dev/null)
+# 未配置或设备无效 → 初始化为 lan1
+default_dev="lan1"
 
-if [ -n "$lan_mac" ] && [ "$lan_mac" != "00:00:00:00:00:00" ]; then
-    prefix=$(echo "$lan_mac" | awk -F: '{print $1":"$2":"$3":"$4":"$5}')
-    last_hex=$(echo "$lan_mac" | awk -F: '{print $6}')
-    
-    last_dec=$(printf "%d" "0x$last_hex")
-    next_dec=$(( (last_dec + 1) % 256 ))
-    next_hex=$(printf "%02x" $next_dec)
-    wan_mac="${prefix}:${next_hex}"
-
-    # 3. 将 WAN 口正确绑定到物理网卡 lan1
-    uci set network.wan=interface
-    uci set network.wan.proto='dhcp'
-    uci set network.wan.device='lan1'
-    uci set network.wan.macaddr="$wan_mac"
-
-    # 4. 将 MAC 注入物理 lan1 设备层 (DSA 架构)
-    uci set network.lan1=device
-    uci set network.lan1.name='lan1'
-    uci set network.lan1.macaddr="$wan_mac"
-
-    uci commit network
+# 若 lan1 不存在，尝试其他 lan 口（容错，但一般不会发生）
+if [ ! -e "/sys/class/net/$default_dev" ]; then
+    for dev in lan2 lan3 lan4; do
+        if [ -e "/sys/class/net/$dev" ]; then
+            default_dev="$dev"
+            break
+        fi
+    done
 fi
+
+# 仍然没有可用接口则退出
+if [ ! -e "/sys/class/net/$default_dev" ]; then
+    exit 1
+fi
+
+# 获取接口 MAC 并计算 +1
+mac=$(cat "/sys/class/net/$default_dev/address" 2>/dev/null)
+if [ -n "$mac" ] && [ "$mac" != "00:00:00:00:00:00" ]; then
+    prefix=$(echo "$mac" | cut -d: -f1-5)
+    last=$(printf "%d" 0x$(echo "$mac" | cut -d: -f6))
+    new_last=$(( (last + 1) % 256 ))
+    new_mac="${prefix}:$(printf "%02x" $new_last)"
+fi
+
+# 保留原有协议（若有），否则默认 dhcp
+proto=$(uci -q get network.wan.proto)
+[ -z "$proto" ] && proto="dhcp"
+
+# 配置 WAN 接口
+uci set network.wan=interface
+uci set network.wan.proto="$proto"
+uci set network.wan.device="$default_dev"
+[ -n "$new_mac" ] && uci set network.wan.macaddr="$new_mac"
+
+# 设备层 MAC（DSA 架构需要）
+uci set network."$default_dev"=device
+uci set network."$default_dev".name="$default_dev"
+[ -n "$new_mac" ] && uci set network."$default_dev".macaddr="$new_mac"
+
+uci commit network
+/etc/init.d/network restart
 
 exit 0
 EOF
-
-# 赋予可执行权限
 chmod +x files/etc/uci-defaults/99-fix-wan-mac
-
 
 # ------------------------------------------------------------
 # 3. 集成 Airoha NPU 控制插件 (luci-app-airoha-npu)
@@ -94,17 +107,21 @@ TARGET_RPC=$(find package/luci-app-airoha-npu/ -name "luci.airoha_npu" 2>/dev/nu
 if [ -n "$TARGET_RPC" ] && [ -f "$TARGET_RPC" ]; then
     echo ">>> 正在修补 RPC 目标文件: $TARGET_RPC"
 
-    # 动态提取命令（从 dmesg 获取 "NPU fw version: X.X.X"）
-    dynamic_cmd='$(dmesg | grep "NPU fw version" | tail -1 | sed -n "s/.*NPU fw version: \([0-9.]*\).*/\1/p")'
+    # 先打印原文件内容（调试用）
+    echo ">>> 修补前文件内容："
+    head -20 "$TARGET_RPC"
 
-    # 替换常见的版本赋值：npu_ver = "..." 或 version = "..."
-    sed -i "s/\(npu_ver\s*=\s*\)[\"'][^\"']*[\"']/\1\"$dynamic_cmd\"/" "$TARGET_RPC"
-    sed -i "s/\(version\s*=\s*\)[\"'][^\"']*[\"']/\1\"$dynamic_cmd\"/" "$TARGET_RPC"
+    # 使用更宽容的匹配：匹配 npu_ver 或 version，支持单引号/双引号/无引号
+    sed -i 's#\(npu_ver\s*=\s*\)["'\'']\{0,1\}[^"'\'']*["'\'']\{0,1\}#\1"$(dmesg | grep "NPU fw version" | tail -1 | sed -n "s/.*NPU fw version: \([0-9.]*\).*/\1/p")"#' "$TARGET_RPC"
+    sed -i 's#\(version\s*=\s*\)["'\'']\{0,1\}[^"'\'']*["'\'']\{0,1\}#\1"$(dmesg | grep "NPU fw version" | tail -1 | sed -n "s/.*NPU fw version: \([0-9.]*\).*/\1/p")"#' "$TARGET_RPC"
 
-    # 清除可能残留的硬编码数字（如 1456.62）
+    # 清除可能残留的硬编码数字
     sed -i '/1456.62/d' "$TARGET_RPC"
 
-    echo ">>> NPU 版本提取修补完成（动态从 dmesg 获取）"
+    echo ">>> 修补后文件内容（前20行）："
+    head -20 "$TARGET_RPC"
+
+    echo ">>> NPU 版本提取修补完成"
 else
     echo "⚠️ 未找到 luci.airoha_npu 文件，跳过修补"
 fi
@@ -194,35 +211,37 @@ EOF
 echo ">>> [DIY-P2] 修复完成！CPU/Temp 插件与温度节点映射均已配置完毕。"
 
 # =========================================================
-# 自动拉取 Loyalsoldier 最新 geosite/geoip 规则并注入固件
+# 下载 Loyalsoldier 完整规则（覆盖官方包，保留编译依赖）
 # =========================================================
-echo ">>> 正在从 github.com/Loyalsoldier 下载最新的 geosite / geoip 数据库..."
+echo ">>> 正在下载 Loyalsoldier 完整规则文件..."
 
-# 1. 清理并重新创建唯一需要的 v2ray 目标文件夹
+# 注意：不删除/禁用 CONFIG_PACKAGE_v2ray-geoip 和 v2ray-geosite
+# 因为 sing-box 和 xray 编译时需要它们作为依赖
+# 但运行时，我们的 files/ 目录会覆盖官方规则文件
+
+# 1. 清理旧目录并创建新目录
 rm -rf files/usr/share/xray files/usr/share/v2ray
 mkdir -p files/usr/share/v2ray/
+mkdir -p files/usr/share/xray
 
-# 2. 从 github 下载最新数据库直接存入 v2ray 目录
+# 2. 下载 Loyalsoldier 规则（比官方更全）
 wget -qO files/usr/share/v2ray/geosite.dat https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat
 wget -qO files/usr/share/v2ray/geoip.dat https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat
 
-echo ">>> 最新 geosite / geoip 数据库注入完成！"
+# 3. 为 xray 创建软链接（同一份文件供两个工具使用）
+ln -sf ../v2ray/geosite.dat files/usr/share/xray/geosite.dat 2>/dev/null || true
+ln -sf ../v2ray/geoip.dat files/usr/share/xray/geoip.dat 2>/dev/null || true
 
-# 强制关闭 SS-Rust，避免 aarch64 默认带上 rust/host
-for opt in \
-  luci-app-passwall2_INCLUDE_Shadowsocks_Rust_Client \
-  luci-app-passwall2_INCLUDE_Shadowsocks_Rust_Server \
-  shadowsocks-rust-sslocal \
-  shadowsocks-rust-ssserver \
-  shadowsocks-rust-ssmanager \
-  shadowsocks-rust-ssurl \
-  shadowsocks-rust-ssservice
-do
-  sed -i "/CONFIG_PACKAGE_${opt}/d" .config 2>/dev/null || true
-  echo "# CONFIG_PACKAGE_${opt} is not set" >> .config
-done
-sed -i '/CONFIG_USE_EXTERNAL_HOST_RUST/d' .config 2>/dev/null || true
-echo "# CONFIG_USE_EXTERNAL_HOST_RUST is not set" >> .config
+# 4. 验证下载
+if [ -f files/usr/share/v2ray/geosite.dat ] && [ -f files/usr/share/v2ray/geoip.dat ]; then
+    echo ">>> ✅ 规则文件下载成功，文件大小："
+    du -sh files/usr/share/v2ray/*.dat
+else
+    echo "⚠️ 警告：规则文件下载失败，请检查网络！"
+    echo ">>> 将使用官方包自带的规则文件作为备选"
+fi
+
+echo ">>> 规则文件注入完成"
 
 # =========================================================
 # 修正 Airoha PPE debugfs 路径匹配 (加在文件最末尾)
@@ -232,7 +251,45 @@ find package/ -type f \( -name "*.lua" -o -name "*.js" -o -name "*.sh" -o -name 
 
 find package/ -type f \( -name "*.lua" -o -name "*.js" -o -name "*.sh" -o -name "*.c" \) \
     -exec sed -i 's/\/sys\/kernel\/debug\/ppe0\/entries/\/sys\/kernel\/debug\/ppe\/entries/g' {} +
-    
+
+# ============================================================
+# sing-box go依赖错误补丁：钉死 sing-box 版本，避开 Go1.27 + json 编译错误
+# 错误：go-json-experiment/json undefined: json.SkipFunc / DiscardUnknownMembers
+# 原因：feeds 里 sing-box 1.13.18 与 Go 1.27 默认 jsonv2 不兼容
+# 处理：回退到 OpenWrt packages 曾用的 1.12.22
+# ============================================================
+echo ">>> [DIY-P2] 正在将 sing-box 固定为 1.12.22（修复 Go1.27 编译失败）..."
+
+SINGBOX_MK=""
+for p in \
+  feeds/packages/net/sing-box/Makefile \
+  package/feeds/packages/net/sing-box/Makefile
+do
+  [ -f "$p" ] && SINGBOX_MK="$p" && break
+done
+
+if [ -z "$SINGBOX_MK" ]; then
+  echo "⚠️ 未找到 sing-box Makefile，跳过版本固定"
+else
+  echo ">>> 目标 Makefile: $SINGBOX_MK"
+
+  # 固定版本与官方 tar 包 hash（openwrt/packages 升 1.13.18 前的 1.12.22）
+  sed -i 's/^PKG_VERSION:=.*/PKG_VERSION:=1.12.22/' "$SINGBOX_MK"
+  sed -i 's/^PKG_RELEASE:=.*/PKG_RELEASE:=1/' "$SINGBOX_MK"
+  sed -i 's/^PKG_HASH:=.*/PKG_HASH:=6c4333c3f53a07cc96b63a801fdf6c156820d51cd2eb05e44ea78df290a45377/' "$SINGBOX_MK"
+
+  echo ">>> 修改后版本字段："
+  grep -E '^PKG_VERSION|^PKG_RELEASE|^PKG_HASH|^PKG_SOURCE_URL' "$SINGBOX_MK" || true
+
+  # 清掉可能已缓存的 1.13.x / 坏 json 模块，强制按新版本下载
+  rm -rf dl/sing-box-1.13.* dl/sing-box-1.12.* 2>/dev/null || true
+  rm -rf dl/go-mod-cache/github.com/go-json-experiment 2>/dev/null || true
+  rm -rf tmp/go-build 2>/dev/null || true
+  rm -rf build_dir/target-*/sing-box-* 2>/dev/null || true
+
+  echo ">>> sing-box 已固定为 1.12.22，并清理相关缓存"
+fi
+
 echo "========================================="
 echo ">>> diy-part2.sh 全部执行完毕！"
 echo "========================================="
