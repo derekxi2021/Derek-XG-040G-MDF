@@ -259,31 +259,6 @@ find package/ -type f \( -name "*.lua" -o -name "*.js" -o -name "*.sh" -o -name 
 find package/ -type f \( -name "*.lua" -o -name "*.js" -o -name "*.sh" -o -name "*.c" \) \
     -exec sed -i 's/\/sys\/kernel\/debug\/ppe0\/entries/\/sys\/kernel\/debug\/ppe\/entries/g' {} +
 
-# =========================================================
-# 强制使用外部 Go（系统安装的 Go 1.26.5）
-# =========================================================
-echo ">>> 强制使用外部 Go..."
-sed -i '/CONFIG_USE_EXTERNAL_HOST_GOLANG/d' .config
-echo "CONFIG_USE_EXTERNAL_HOST_GOLANG=y" >> .config
-# set golang version：
-
-#echo ">>> 配置 OpenWrt 使用 feed 内 Go 工具链（自举）..."
-# set golang 1.26.x （rc/beta）
-#rm -rf feeds/packages/lang/golang
-#git clone https://github.com/kenzok8/golang -b 1.26 feeds/packages/lang/golang
-
-# set golang 1.25.x
-#rm -rf feeds/packages/lang/golang
-#git clone https://github.com/kenzok8/golang -b 1.25 feeds/packages/lang/golang
-
-# set golang 1.24.x (main)
-#rm -rf feeds/packages/lang/golang
-#git clone https://github.com/kenzok8/golang feeds/packages/lang/golang
-
-# set golang 1.23.x
-#rm -rf feeds/packages/lang/golang
-#git clone https://github.com/kenzok8/golang -b 1.23 feeds/packages/lang/golang
-
 echo "========================================="
 echo ">>> diy-part2.sh 全部执行完毕！"
 echo "========================================="
