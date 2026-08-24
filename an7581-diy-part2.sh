@@ -101,34 +101,20 @@ sed -i 's|include ../../luci.mk|include $(TOPDIR)/feeds/luci/luci.mk|' package/l
 echo "CONFIG_PACKAGE_luci-app-airoha-npu=y" >> .config
 
 # ------------------------------------------------------------
-# 修补 rpcd 后端脚本：使用 awk 替换
+# 修补 rpcd 后端脚本：从 dmesg 动态提取 NPU 版本
 # ------------------------------------------------------------
 TARGET_RPC=$(find package/luci-app-airoha-npu/ -name "luci.airoha_npu" 2>/dev/null | head -n 1)
 if [ -n "$TARGET_RPC" ] && [ -f "$TARGET_RPC" ]; then
     echo ">>> 正在修补 RPC 目标文件: $TARGET_RPC"
 
-    # 使用 awk 替换 npu_ver 行（更安全，不受特殊字符影响）
-    awk -i inplace '
-    /^[[:space:]]*npu_ver[[:space:]]*=/ {
-        print "npu_ver=\"$(dmesg | grep \"NPU fw version\" | tail -1 | sed -n '\''s/.*NPU fw version: \\([0-9.]*\\).*/\\1/p'\'')\""
-        next
-    }
-    { print }
-    ' "$TARGET_RPC"
-
-    # 同时处理 version 变量（如果存在）
-    awk -i inplace '
-    /^[[:space:]]*version[[:space:]]*=/ {
-        print "version=\"$(dmesg | grep \"NPU fw version\" | tail -1 | sed -n '\''s/.*NPU fw version: \\([0-9.]*\\).*/\\1/p'\'')\""
-        next
-    }
-    { print }
-    ' "$TARGET_RPC"
+    # 使用 sed 替换（用 # 作为分隔符，避免与 / 冲突）
+    sed -i 's#\(npu_ver\s*=\s*\)"[^"]*"#\1"$(dmesg | grep "NPU fw version" | tail -1 | sed -n "s/.*NPU fw version: \([0-9.]*\).*/\1/p")"#' "$TARGET_RPC"
+    sed -i 's#\(version\s*=\s*\)"[^"]*"#\1"$(dmesg | grep "NPU fw version" | tail -1 | sed -n "s/.*NPU fw version: \([0-9.]*\).*/\1/p")"#' "$TARGET_RPC"
 
     # 清除可能残留的硬编码数字
     sed -i '/1456.62/d' "$TARGET_RPC"
 
-    echo ">>> NPU 版本提取修补完成（动态从 dmesg 获取）"
+    echo ">>> NPU 版本提取修补完成"
 else
     echo "⚠️ 未找到 luci.airoha_npu 文件，跳过修补"
 fi
@@ -258,6 +244,8 @@ find package/ -type f \( -name "*.lua" -o -name "*.js" -o -name "*.sh" -o -name 
 
 find package/ -type f \( -name "*.lua" -o -name "*.js" -o -name "*.sh" -o -name "*.c" \) \
     -exec sed -i 's/\/sys\/kernel\/debug\/ppe0\/entries/\/sys\/kernel\/debug\/ppe\/entries/g' {} +
+
+rm -rf tmp/dl/go-mod-cache
 
 echo "========================================="
 echo ">>> diy-part2.sh 全部执行完毕！"
