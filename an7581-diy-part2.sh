@@ -84,16 +84,29 @@ rm -rf package/luci-app-airoha-npu
 git clone --depth=1 https://github.com/rchen14b/luci-app-airoha-npu.git package/luci-app-airoha-npu
 sed -i 's|include ../../luci.mk|include $(TOPDIR)/feeds/luci/luci.mk|' package/luci-app-airoha-npu/Makefile
 
-# 强行开启配置选中
+# 强制开启配置选中
 echo "CONFIG_PACKAGE_luci-app-airoha-npu=y" >> .config
 
-# 修补 rpcd 后端脚本
+# ------------------------------------------------------------
+# 修补 rpcd 后端脚本：从 dmesg 动态提取 NPU 版本
+# ------------------------------------------------------------
 TARGET_RPC=$(find package/luci-app-airoha-npu/ -name "luci.airoha_npu" 2>/dev/null | head -n 1)
-
 if [ -n "$TARGET_RPC" ] && [ -f "$TARGET_RPC" ]; then
     echo ">>> 正在修补 RPC 目标文件: $TARGET_RPC"
-    sed -i '/strings "$npu_fw"/c\                npu_ver=$(dmesg | grep -i "NPU fw version" | tail -n 1 | sed -n "s/.*NPU fw version: *\\([0-9.]*\\).*/\\1/p")' "$TARGET_RPC"
-    sed -i 's/"Unknown"/"1456.62"/g' "$TARGET_RPC"
+
+    # 动态提取命令（从 dmesg 获取 "NPU fw version: X.X.X"）
+    dynamic_cmd='$(dmesg | grep "NPU fw version" | tail -1 | sed -n "s/.*NPU fw version: \([0-9.]*\).*/\1/p")'
+
+    # 替换常见的版本赋值：npu_ver = "..." 或 version = "..."
+    sed -i "s/\(npu_ver\s*=\s*\)[\"'][^\"']*[\"']/\1\"$dynamic_cmd\"/" "$TARGET_RPC"
+    sed -i "s/\(version\s*=\s*\)[\"'][^\"']*[\"']/\1\"$dynamic_cmd\"/" "$TARGET_RPC"
+
+    # 清除可能残留的硬编码数字（如 1456.62）
+    sed -i '/1456.62/d' "$TARGET_RPC"
+
+    echo ">>> NPU 版本提取修补完成（动态从 dmesg 获取）"
+else
+    echo "⚠️ 未找到 luci.airoha_npu 文件，跳过修补"
 fi
 
 # ------------------------------------------------------------
