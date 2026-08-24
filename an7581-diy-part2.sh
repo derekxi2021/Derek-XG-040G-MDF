@@ -107,12 +107,19 @@ TARGET_RPC=$(find package/luci-app-airoha-npu/ -name "luci.airoha_npu" 2>/dev/nu
 if [ -n "$TARGET_RPC" ] && [ -f "$TARGET_RPC" ]; then
     echo ">>> 正在修补 RPC 目标文件: $TARGET_RPC"
 
-    # 使用 sed 替换（用 # 作为分隔符，避免与 / 冲突）
-    sed -i 's#\(npu_ver\s*=\s*\)"[^"]*"#\1"$(dmesg | grep "NPU fw version" | tail -1 | sed -n "s/.*NPU fw version: \([0-9.]*\).*/\1/p")"#' "$TARGET_RPC"
-    sed -i 's#\(version\s*=\s*\)"[^"]*"#\1"$(dmesg | grep "NPU fw version" | tail -1 | sed -n "s/.*NPU fw version: \([0-9.]*\).*/\1/p")"#' "$TARGET_RPC"
+    # 先打印原文件内容（调试用）
+    echo ">>> 修补前文件内容："
+    head -20 "$TARGET_RPC"
+
+    # 使用更宽容的匹配：匹配 npu_ver 或 version，支持单引号/双引号/无引号
+    sed -i 's#\(npu_ver\s*=\s*\)["'\'']\{0,1\}[^"'\'']*["'\'']\{0,1\}#\1"$(dmesg | grep "NPU fw version" | tail -1 | sed -n "s/.*NPU fw version: \([0-9.]*\).*/\1/p")"#' "$TARGET_RPC"
+    sed -i 's#\(version\s*=\s*\)["'\'']\{0,1\}[^"'\'']*["'\'']\{0,1\}#\1"$(dmesg | grep "NPU fw version" | tail -1 | sed -n "s/.*NPU fw version: \([0-9.]*\).*/\1/p")"#' "$TARGET_RPC"
 
     # 清除可能残留的硬编码数字
     sed -i '/1456.62/d' "$TARGET_RPC"
+
+    echo ">>> 修补后文件内容（前20行）："
+    head -20 "$TARGET_RPC"
 
     echo ">>> NPU 版本提取修补完成"
 else
