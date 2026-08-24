@@ -30,49 +30,63 @@ echo ">>> [2/5] 正在配置 WAN MAC 地址 +1 初始化规则..."
 # 创建 uci-defaults 目录
 mkdir -p files/etc/uci-defaults
 
-echo ">>> [2/5] 正在配置 WAN MAC 地址 +1 初始化规则..."
-
-# 创建 uci-defaults 目录
-mkdir -p files/etc/uci-defaults
-
 cat << 'EOF' > files/etc/uci-defaults/99-fix-wan-mac
 #!/bin/sh
 
-# 1. 安全检查：如果检测到已有网络配置（说明是保留配置升级上来的），直接退出不干预
-if uci -q get network.wan.proto >/dev/null; then
+# 检查当前 WAN 配置是否存在且设备有效
+wan_device=$(uci -q get network.wan.device)
+if [ -n "$wan_device" ] && [ -e "/sys/class/net/$wan_device" ]; then
+    # 配置存在且设备存在 → 保留用户自定义设置，直接退出
     exit 0
 fi
 
-# 2. 抓取 lan1 节点的原始物理 MAC
-lan_mac=$(cat /sys/class/net/lan1/address 2>/dev/null)
+# 未配置或设备无效 → 初始化为 lan1
+default_dev="lan1"
 
-if [ -n "$lan_mac" ] && [ "$lan_mac" != "00:00:00:00:00:00" ]; then
-    prefix=$(echo "$lan_mac" | awk -F: '{print $1":"$2":"$3":"$4":"$5}')
-    last_hex=$(echo "$lan_mac" | awk -F: '{print $6}')
-    
-    last_dec=$(printf "%d" "0x$last_hex")
-    next_dec=$(( (last_dec + 1) % 256 ))
-    next_hex=$(printf "%02x" $next_dec)
-    wan_mac="${prefix}:${next_hex}"
-
-    # 3. 将 WAN 口正确绑定到物理网卡 lan1
-    uci set network.wan=interface
-    uci set network.wan.proto='dhcp'
-    uci set network.wan.device='lan1'
-    uci set network.wan.macaddr="$wan_mac"
-
-    # 4. 将 MAC 注入物理 lan1 设备层 (DSA 架构)
-    uci set network.lan1=device
-    uci set network.lan1.name='lan1'
-    uci set network.lan1.macaddr="$wan_mac"
-
-    uci commit network
+# 若 lan1 不存在，尝试其他 lan 口（容错，但一般不会发生）
+if [ ! -e "/sys/class/net/$default_dev" ]; then
+    for dev in lan2 lan3 lan4; do
+        if [ -e "/sys/class/net/$dev" ]; then
+            default_dev="$dev"
+            break
+        fi
+    done
 fi
+
+# 仍然没有可用接口则退出
+if [ ! -e "/sys/class/net/$default_dev" ]; then
+    exit 1
+fi
+
+# 获取接口 MAC 并计算 +1
+mac=$(cat "/sys/class/net/$default_dev/address" 2>/dev/null)
+if [ -n "$mac" ] && [ "$mac" != "00:00:00:00:00:00" ]; then
+    prefix=$(echo "$mac" | cut -d: -f1-5)
+    last=$(printf "%d" 0x$(echo "$mac" | cut -d: -f6))
+    new_last=$(( (last + 1) % 256 ))
+    new_mac="${prefix}:$(printf "%02x" $new_last)"
+fi
+
+# 保留原有协议（若有），否则默认 dhcp
+proto=$(uci -q get network.wan.proto)
+[ -z "$proto" ] && proto="dhcp"
+
+# 配置 WAN 接口
+uci set network.wan=interface
+uci set network.wan.proto="$proto"
+uci set network.wan.device="$default_dev"
+[ -n "$new_mac" ] && uci set network.wan.macaddr="$new_mac"
+
+# 设备层 MAC（DSA 架构需要）
+uci set network."$default_dev"=device
+uci set network."$default_dev".name="$default_dev"
+[ -n "$new_mac" ] && uci set network."$default_dev".macaddr="$new_mac"
+
+uci commit network
+/etc/init.d/network restart
 
 exit 0
 EOF
-
-# 赋予可执行权限
 chmod +x files/etc/uci-defaults/99-fix-wan-mac
 
 
@@ -94,12 +108,12 @@ TARGET_RPC=$(find package/luci-app-airoha-npu/ -name "luci.airoha_npu" 2>/dev/nu
 if [ -n "$TARGET_RPC" ] && [ -f "$TARGET_RPC" ]; then
     echo ">>> 正在修补 RPC 目标文件: $TARGET_RPC"
 
-    # 动态提取命令（从 dmesg 获取 "NPU fw version: X.X.X"）
-    dynamic_cmd='$(dmesg | grep "NPU fw version" | tail -1 | sed -n "s/.*NPU fw version: \([0-9.]*\).*/\1/p")'
+    # 使用单引号包裹，内部双引号无需转义，更清晰
+    # 替换 npu_ver = "..." 或 npu_ver = '...'
+    sed -i 's|\(npu_ver\s*=\s*\)["'\'']\{1\}[^"'\'']*["'\'']\{1\}|\1"$(dmesg | grep "NPU fw version" | tail -1 | sed -n "s/.*NPU fw version: \([0-9.]*\).*/\1/p")"|' "$TARGET_RPC"
 
-    # 替换常见的版本赋值：npu_ver = "..." 或 version = "..."
-    sed -i "s/\(npu_ver\s*=\s*\)[\"'][^\"']*[\"']/\1\"$dynamic_cmd\"/" "$TARGET_RPC"
-    sed -i "s/\(version\s*=\s*\)[\"'][^\"']*[\"']/\1\"$dynamic_cmd\"/" "$TARGET_RPC"
+    # 替换 version = "..." 或 version = '...'
+    sed -i 's|\(version\s*=\s*\)["'\'']\{1\}[^"'\'']*["'\'']\{1\}|\1"$(dmesg | grep "NPU fw version" | tail -1 | sed -n "s/.*NPU fw version: \([0-9.]*\).*/\1/p")"|' "$TARGET_RPC"
 
     # 清除可能残留的硬编码数字（如 1456.62）
     sed -i '/1456.62/d' "$TARGET_RPC"
