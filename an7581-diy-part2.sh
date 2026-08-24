@@ -30,6 +30,11 @@ echo ">>> [2/5] 正在配置 WAN MAC 地址 +1 初始化规则..."
 # 创建 uci-defaults 目录
 mkdir -p files/etc/uci-defaults
 
+echo ">>> [2/5] 正在配置 WAN MAC 地址 +1 初始化规则..."
+
+# 创建 uci-defaults 目录
+mkdir -p files/etc/uci-defaults
+
 cat << 'EOF' > files/etc/uci-defaults/99-fix-wan-mac
 #!/bin/sh
 
@@ -69,6 +74,7 @@ EOF
 
 # 赋予可执行权限
 chmod +x files/etc/uci-defaults/99-fix-wan-mac
+
 
 # ------------------------------------------------------------
 # 3. 集成 Airoha NPU 控制插件 (luci-app-airoha-npu)
