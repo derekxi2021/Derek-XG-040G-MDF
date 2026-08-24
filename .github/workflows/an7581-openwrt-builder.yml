@@ -10,7 +10,7 @@
 # See /LICENSE for more information.
 #
 
-name: XiangTailiang's OpenWrt Builder
+name: an7581 OpenWrt Builder
 
 on:
   repository_dispatch:
