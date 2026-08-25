@@ -101,49 +101,6 @@ sed -i 's|include ../../luci.mk|include $(TOPDIR)/feeds/luci/luci.mk|' package/l
 echo "CONFIG_PACKAGE_luci-app-airoha-npu=y" >> .config
 
 # ------------------------------------------------------------
-# 修补 rpcd 后端脚本：完全替换 NPU 版本提取逻辑
-# ------------------------------------------------------------
-TARGET_RPC=$(find package/luci-app-airoha-npu/ -name "luci.airoha_npu" 2>/dev/null | head -n 1)
-if [ -n "$TARGET_RPC" ] && [ -f "$TARGET_RPC" ]; then
-    echo ">>> 正在修补 RPC 目标文件: $TARGET_RPC"
-
-    # 使用 awk 精确替换 npu_ver 的赋值行
-    awk -i inplace '
-    /^[[:space:]]*local npu_ver="Unknown"/ {
-        print "    local npu_ver=\"$(dmesg | grep \\\"NPU fw version\\\" | tail -1 | sed -n \\\"s/.*NPU fw version: \\([0-9.]*\\).*/\\1/p\\\")\""
-        next
-    }
-    /^[[:space:]]*npu_ver=\$\(strings/ {
-        # 跳过原来的 strings 提取行，因为已经被上面的替换覆盖了
-        next
-    }
-    { print }
-    ' "$TARGET_RPC"
-
-    # 如果 awk -i inplace 不支持，改用临时文件
-    if [ $? -ne 0 ]; then
-        echo ">>> awk -i inplace 不支持，改用临时文件..."
-        awk '
-        /^[[:space:]]*local npu_ver="Unknown"/ {
-            print "    local npu_ver=\"$(dmesg | grep \\\"NPU fw version\\\" | tail -1 | sed -n \\\"s/.*NPU fw version: \\([0-9.]*\\).*/\\1/p\\\")\""
-            next
-        }
-        /^[[:space:]]*npu_ver=\$\(strings/ {
-            next
-        }
-        { print }
-        ' "$TARGET_RPC" > "$TARGET_RPC.tmp" && mv "$TARGET_RPC.tmp" "$TARGET_RPC"
-    fi
-
-    echo ">>> 修补后 npu_ver 相关行："
-    grep -n "npu_ver" "$TARGET_RPC" | head -5
-
-    echo ">>> NPU 版本提取修补完成"
-else
-    echo "⚠️ 未找到 luci.airoha_npu 文件，跳过修补"
-fi
-
-# ------------------------------------------------------------
 # 4. 集成 KMS 激活服务 (vlmcsd & luci-app-vlmcsd)
 # ------------------------------------------------------------
 echo ">>> [4/5] 正在添加 vlmcsd KMS 服务..."
