@@ -101,46 +101,51 @@ sed -i 's|include ../../luci.mk|include $(TOPDIR)/feeds/luci/luci.mk|' package/l
 echo "CONFIG_PACKAGE_luci-app-airoha-npu=y" >> .config
 
 # ------------------------------------------------------------
-# 修补 rpcd 后端脚本：强制覆盖 NPU 版本提取
+# 修补 rpcd 后端脚本：彻底替换 NPU 版本提取逻辑（从 dmesg 直接提取）
 # ------------------------------------------------------------
 TARGET_RPC=$(find package/luci-app-airoha-npu/ -name "luci.airoha_npu" 2>/dev/null | head -n 1)
 if [ -n "$TARGET_RPC" ] && [ -f "$TARGET_RPC" ]; then
     echo ">>> 正在彻底替换 RPC 目标文件中的 NPU 版本提取逻辑: $TARGET_RPC"
 
-    # 使用 awk 直接替换整个 npu_ver 赋值块
+    # 使用 awk 替换整个 npu_ver 赋值和后续 if 块（与你在设备上手动测试成功的逻辑完全一致）
     awk -i inplace '
-    /^[[:space:]]*# 尝试多种方式获取 NPU 版本/, /^[[:space:]]*\[ -z "\$npu_ver" \] && npu_ver="Unknown"/ {
-        if (!done) {
-            print "    # 使用 dmesg 直接提取 NPU 版本（无转义问题）"
-            print "    local npu_ver=\"\""
-            print "    npu_ver=$(dmesg | grep \"NPU fw version\" | tail -1 | sed -n \"s/.*NPU fw version: \\([0-9.]*\\).*/\\1/p\")"
-            print "    [ -z \"$npu_ver\" ] && npu_ver=\"Unknown\""
-            done=1
-        }
+    /^[[:space:]]*local npu_ver="Unknown"/ {
+        print "    local npu_ver=\"\""
+        print "    npu_ver=$(dmesg 2>/dev/null | grep -i \"NPU fw version\" | tail -n 1 | sed -n \"s/.*NPU fw version: *\\([0-9][0-9.]*\\).*/\\1/p\")"
+        print "    [ -z \"$npu_ver\" ] && npu_ver=\"Unknown\""
+        # 跳过整个 if 块（直到匹配到 fi）
+        in_if_block = 1
         next
     }
+    in_if_block && /^[[:space:]]*fi/ {
+        in_if_block = 0
+        next
+    }
+    in_if_block { next }
     { print }
     ' "$TARGET_RPC"
 
-    # 如果 awk -i inplace 不支持，改用临时文件
+    # 如果 awk -i inplace 不支持，使用临时文件方式（备用）
     if [ $? -ne 0 ]; then
         echo ">>> awk -i inplace 不支持，改用临时文件..."
         awk '
-        /^[[:space:]]*# 尝试多种方式获取 NPU 版本/, /^[[:space:]]*\[ -z "\$npu_ver" \] && npu_ver="Unknown"/ {
-            if (!done) {
-                print "    # 使用 dmesg 直接提取 NPU 版本（无转义问题）"
-                print "    local npu_ver=\"\""
-                print "    npu_ver=$(dmesg | grep \"NPU fw version\" | tail -1 | sed -n \"s/.*NPU fw version: \\([0-9.]*\\).*/\\1/p\")"
-                print "    [ -z \"$npu_ver\" ] && npu_ver=\"Unknown\""
-                done=1
-            }
+        /^[[:space:]]*local npu_ver="Unknown"/ {
+            print "    local npu_ver=\"\""
+            print "    npu_ver=$(dmesg 2>/dev/null | grep -i \"NPU fw version\" | tail -n 1 | sed -n \"s/.*NPU fw version: *\\([0-9][0-9.]*\\).*/\\1/p\")"
+            print "    [ -z \"$npu_ver\" ] && npu_ver=\"Unknown\""
+            in_if_block = 1
             next
         }
+        in_if_block && /^[[:space:]]*fi/ {
+            in_if_block = 0
+            next
+        }
+        in_if_block { next }
         { print }
         ' "$TARGET_RPC" > "$TARGET_RPC.tmp" && mv "$TARGET_RPC.tmp" "$TARGET_RPC"
     fi
 
-    echo ">>> NPU 版本提取逻辑已强制覆盖"
+    echo ">>> NPU 版本提取逻辑已彻底替换"
 else
     echo "⚠️ 未找到 luci.airoha_npu 文件，跳过修补"
 fi
