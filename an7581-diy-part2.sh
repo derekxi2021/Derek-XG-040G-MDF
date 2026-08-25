@@ -78,9 +78,9 @@ uci set network.wan.device="$default_dev"
 [ -n "$new_mac" ] && uci set network.wan.macaddr="$new_mac"
 
 # 设备层 MAC（DSA 架构需要）
-uci set network."$default_dev"=device
-uci set network."$default_dev".name="$default_dev"
-[ -n "$new_mac" ] && uci set network."$default_dev".macaddr="$new_mac"
+#uci set network."$default_dev"=device
+#uci set network."$default_dev".name="$default_dev"
+#[ -n "$new_mac" ] && uci set network."$default_dev".macaddr="$new_mac"
 
 uci commit network
 /etc/init.d/network restart
@@ -101,42 +101,43 @@ sed -i 's|include ../../luci.mk|include $(TOPDIR)/feeds/luci/luci.mk|' package/l
 echo "CONFIG_PACKAGE_luci-app-airoha-npu=y" >> .config
 
 # ------------------------------------------------------------
-# 修补 rpcd 后端脚本：完全替换 NPU 版本提取逻辑
+# 修补 rpcd 后端脚本：增强版 NPU 版本提取
 # ------------------------------------------------------------
 TARGET_RPC=$(find package/luci-app-airoha-npu/ -name "luci.airoha_npu" 2>/dev/null | head -n 1)
 if [ -n "$TARGET_RPC" ] && [ -f "$TARGET_RPC" ]; then
     echo ">>> 正在修补 RPC 目标文件: $TARGET_RPC"
 
-    # 使用 awk 精确替换 npu_ver 的赋值行
+    # 使用 awk 替换 npu_ver 为更健壮的提取逻辑
     awk -i inplace '
     /^[[:space:]]*local npu_ver="Unknown"/ {
-        print "    local npu_ver=\"$(dmesg | grep \\\"NPU fw version\\\" | tail -1 | sed -n \\\"s/.*NPU fw version: \\([0-9.]*\\).*/\\1/p\\\")\""
+        print "    # 尝试多种方式获取 NPU 版本"
+        print "    local npu_ver=\"\""
+        print "    # 方式1: 从 dmesg 提取"
+        print "    npu_ver=$(dmesg | grep \\\"NPU fw version\\\" | tail -1 | sed -n \\\"s/.*NPU fw version: \\([0-9.]*\\).*/\\1/p\\\")"
+        print "    # 方式2: 如果 dmesg 没有，尝试从 /sys 读取"
+        print "    if [ -z \"$npu_ver\" ] && [ -f /sys/class/airoha/npu_version ]; then"
+        print "        npu_ver=$(cat /sys/class/airoha/npu_version 2>/dev/null)"
+        print "    fi"
+        print "    # 方式3: 尝试从固件文件提取（原插件方法）"
+        print "    if [ -z \"$npu_ver\" ] && [ -n \"$npu_fw\" ] && [ -f \"$npu_fw\" ]; then"
+        print "        npu_ver=$(strings \"$npu_fw\" 2>/dev/null | grep -oE \"([0-9]+\\.[0-9]+\\.[0-9]+-)?TLB[0-9.]+[-_v0-9]*\" | head -1)"
+        print "    fi"
+        print "    [ -z \"$npu_ver\" ] && npu_ver=\"Unknown\""
+        # 跳过原文件的 npu_ver 后续赋值行
         next
     }
     /^[[:space:]]*npu_ver=\$\(strings/ {
-        # 跳过原来的 strings 提取行，因为已经被上面的替换覆盖了
+        # 跳过原 strings 提取行
         next
     }
     { print }
     ' "$TARGET_RPC"
 
-    # 如果 awk -i inplace 不支持，改用临时文件
+    # 备用方案：如果 awk -i inplace 失败
     if [ $? -ne 0 ]; then
-        echo ">>> awk -i inplace 不支持，改用临时文件..."
-        awk '
-        /^[[:space:]]*local npu_ver="Unknown"/ {
-            print "    local npu_ver=\"$(dmesg | grep \\\"NPU fw version\\\" | tail -1 | sed -n \\\"s/.*NPU fw version: \\([0-9.]*\\).*/\\1/p\\\")\""
-            next
-        }
-        /^[[:space:]]*npu_ver=\$\(strings/ {
-            next
-        }
-        { print }
-        ' "$TARGET_RPC" > "$TARGET_RPC.tmp" && mv "$TARGET_RPC.tmp" "$TARGET_RPC"
+        echo ">>> awk -i inplace 失败，改用 sed 快速修复..."
+        sed -i 's#\(local npu_ver="\)Unknown"#\1$(dmesg | grep "NPU fw version" | tail -1 | sed -n "s/.*NPU fw version: \([0-9.]*\).*/\1/p" || echo "Unknown")"#' "$TARGET_RPC"
     fi
-
-    echo ">>> 修补后 npu_ver 相关行："
-    grep -n "npu_ver" "$TARGET_RPC" | head -5
 
     echo ">>> NPU 版本提取修补完成"
 else
