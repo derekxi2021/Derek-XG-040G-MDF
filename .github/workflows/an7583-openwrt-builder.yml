@@ -106,12 +106,14 @@ jobs:
     - name: Cache Host Tools
       uses: actions/cache@v4
       with:
-        path: staging_dir/hostpkg
-        key: ${{ runner.os }}-hostpkg-an7583-${{ github.ref_name }}-${{ hashFiles('feeds/packages/lang/golang/**/*', 'feeds/packages/devel/**/*', 'feeds/packages/libs/toolchain/**/*') }}
+        path: |
+          /workdir/openwrt/staging_dir/host
+          /workdir/openwrt/staging_dir/hostpkg
+        # 不要用 hashFiles(feeds/...)，除非放在 feeds update 之后且路径带 openwrt/
+        key: ${{ runner.os }}-openwrt-host-an7583-${{ github.ref_name }}-v3
         restore-keys: |
-          ${{ runner.os }}-hostpkg-an7583-${{ github.ref_name }}-
-          ${{ runner.os }}-hostpkg-an7583-
-          ${{ runner.os }}-hostpkg-
+          ${{ runner.os }}-openwrt-host-an7583-${{ github.ref_name }}-
+          ${{ runner.os }}-openwrt-host-an7583-
 
     # 4. 初始化 ccache 参数
     - name: Init Ccache Config
