@@ -101,22 +101,46 @@ sed -i 's|include ../../luci.mk|include $(TOPDIR)/feeds/luci/luci.mk|' package/l
 echo "CONFIG_PACKAGE_luci-app-airoha-npu=y" >> .config
 
 # ------------------------------------------------------------
-# 修补 rpcd 后端脚本：从 dmesg 动态提取 NPU 版本
+# 修补 rpcd 后端脚本：强制覆盖 NPU 版本提取
 # ------------------------------------------------------------
 TARGET_RPC=$(find package/luci-app-airoha-npu/ -name "luci.airoha_npu" 2>/dev/null | head -n 1)
 if [ -n "$TARGET_RPC" ] && [ -f "$TARGET_RPC" ]; then
-    echo ">>> 正在修补 RPC 目标文件: $TARGET_RPC"
+    echo ">>> 正在彻底替换 RPC 目标文件中的 NPU 版本提取逻辑: $TARGET_RPC"
 
-    # 1. 直接替换 npu_ver 的赋值行（兼容单双引号）
-    sed -i 's#\(npu_ver\s*=\s*\)["'\'']\{0,1\}[^"'\'']*["'\'']\{0,1\}#\1"$(dmesg | grep "NPU fw version" | tail -1 | sed -n "s/.*NPU fw version: \([0-9.]*\).*/\1/p")"#' "$TARGET_RPC"
+    # 使用 awk 直接替换整个 npu_ver 赋值块
+    awk -i inplace '
+    /^[[:space:]]*# 尝试多种方式获取 NPU 版本/, /^[[:space:]]*\[ -z "\$npu_ver" \] && npu_ver="Unknown"/ {
+        if (!done) {
+            print "    # 使用 dmesg 直接提取 NPU 版本（无转义问题）"
+            print "    local npu_ver=\"\""
+            print "    npu_ver=$(dmesg | grep \"NPU fw version\" | tail -1 | sed -n \"s/.*NPU fw version: \\([0-9.]*\\).*/\\1/p\")"
+            print "    [ -z \"$npu_ver\" ] && npu_ver=\"Unknown\""
+            done=1
+        }
+        next
+    }
+    { print }
+    ' "$TARGET_RPC"
 
-    # 2. 如果有 version 变量，同样处理
-    sed -i 's#\(version\s*=\s*\)["'\'']\{0,1\}[^"'\'']*["'\'']\{0,1\}#\1"$(dmesg | grep "NPU fw version" | tail -1 | sed -n "s/.*NPU fw version: \([0-9.]*\).*/\1/p")"#' "$TARGET_RPC"
+    # 如果 awk -i inplace 不支持，改用临时文件
+    if [ $? -ne 0 ]; then
+        echo ">>> awk -i inplace 不支持，改用临时文件..."
+        awk '
+        /^[[:space:]]*# 尝试多种方式获取 NPU 版本/, /^[[:space:]]*\[ -z "\$npu_ver" \] && npu_ver="Unknown"/ {
+            if (!done) {
+                print "    # 使用 dmesg 直接提取 NPU 版本（无转义问题）"
+                print "    local npu_ver=\"\""
+                print "    npu_ver=$(dmesg | grep \"NPU fw version\" | tail -1 | sed -n \"s/.*NPU fw version: \\([0-9.]*\\).*/\\1/p\")"
+                print "    [ -z \"$npu_ver\" ] && npu_ver=\"Unknown\""
+                done=1
+            }
+            next
+        }
+        { print }
+        ' "$TARGET_RPC" > "$TARGET_RPC.tmp" && mv "$TARGET_RPC.tmp" "$TARGET_RPC"
+    fi
 
-    # 3. 清除硬编码数字（如 1456.62）
-    sed -i '/1456.62/d' "$TARGET_RPC"
-
-    echo ">>> NPU 版本提取修补完成"
+    echo ">>> NPU 版本提取逻辑已强制覆盖"
 else
     echo "⚠️ 未找到 luci.airoha_npu 文件，跳过修补"
 fi
