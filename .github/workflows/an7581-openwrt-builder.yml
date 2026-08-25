@@ -99,7 +99,18 @@ jobs:
         path: ~/.ccache
         key: ${{ runner.os }}-openwrt-ccache-an7581-${{ github.ref_name }}
         restore-keys: |
+          ${{ runner.os }}-openwrt-ccache-an7581-${{ github.ref_name }}
+          ${{ runner.os }}-openwrt-ccache-an7581-
           ${{ runner.os }}-openwrt-ccache-
+    
+    - name: Cache Go Toolchain
+      uses: actions/cache@v4
+      with:
+        path: staging_dir/hostpkg/lib/go-*
+        key: ${{ runner.os }}-go-toolchain-an7581-${{ hashFiles('feeds/packages/lang/golang/*') }}
+        restore-keys: |
+          ${{ runner.os }}-go-toolchain-an7581-
+          ${{ runner.os }}-go-toolchain-
 
     # 4. 初始化 ccache 参数
     - name: Init Ccache Config
@@ -108,7 +119,7 @@ jobs:
         ccache -M 10G
         ccache -o compression=true
         ccache -z
-
+    
     - name: Load custom feeds
       run: |
         [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
