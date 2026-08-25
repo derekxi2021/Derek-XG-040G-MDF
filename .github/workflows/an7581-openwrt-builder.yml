@@ -17,8 +17,8 @@ on:
   workflow_dispatch:
 
 env:
-  #REPO_URL: https://github.com/openwrt/openwrt
-  REPO_URL: https://github.com/xiangtailiang/openwrt
+  REPO_URL: https://github.com/openwrt/openwrt
+  #REPO_URL: https://github.com/xiangtailiang/openwrt
   REPO_BRANCH: main
   FEEDS_CONF: feeds.conf.default
   CONFIG_FILE: an7581.config
