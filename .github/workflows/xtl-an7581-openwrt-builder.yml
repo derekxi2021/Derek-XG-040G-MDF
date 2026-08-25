@@ -1,0 +1,423 @@
+#
+# https://github.com/P3TERX/Actions-OpenWrt
+#
+# File: .github/workflows/openwrt-bulder.yml
+# Description: Build OpenWrt using GitHub Actions
+#
+# Copyright (c) 2019-2024 P3TERX <https://p3terx.com>
+#
+# This is free software, licensed under the MIT License.
+# See /LICENSE for more information.
+#
+
+name: an7581 xtl-OpenWrt Builder
+
+on:
+  repository_dispatch:
+  workflow_dispatch:
+
+env:
+  #REPO_URL: https://github.com/openwrt/openwrt
+  REPO_URL: https://github.com/xiangtailiang/openwrt
+  REPO_BRANCH: main
+  FEEDS_CONF: feeds.conf.default
+  CONFIG_FILE: an7581.config
+  DIY_P1_SH: diy-part1.sh
+  DIY_P2_SH: an7581-diy-part2.sh
+  UPLOAD_BIN_DIR: false
+  UPLOAD_FIRMWARE: true
+  UPLOAD_RELEASE: true
+  TZ: Asia/Shanghai
+  # ===== 下面是新增的 Ccache 极速命中参数 =====
+  CCACHE_DIR: /home/runner/.ccache
+  CCACHE_BASEDIR: /workdir/openwrt
+  CCACHE_NOHASHDIR: "true"
+  CCACHE_SLOPPINESS: time_macros,include_file_mtime,include_file_ctime,file_stat_matches,pch_defines
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    permissions:
+      actions: write
+      contents: write
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Initialization environment
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+        sudo docker image prune --all --force
+        sudo -E apt-get -qq update
+        sudo -E apt-get -qq install ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 cmake cpio curl device-tree-compiler dos2unix fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python2.7 python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
+        sudo -E apt-get -qq autoremove --purge
+        sudo -E apt-get -qq clean
+        sudo timedatectl set-timezone "$TZ"
+        sudo mkdir -p /workdir
+        sudo chown $USER:$GROUPS /workdir
+        
+    - name: Clone source code
+      working-directory: /workdir
+      run: |
+        df -hT $PWD
+        git clone $REPO_URL -b $REPO_BRANCH openwrt
+        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+    
+    #- name: Install Go 1.26 toolchain
+      #run: |
+        #GO_VER=1.26.5   # 与 feeds 里 golang1.26 接近即可，可按需改
+        #curl -fsSL "https://go.dev/dl/go${GO_VER}.linux-amd64.tar.gz" -o /tmp/go.tgz
+        #sudo rm -rf /usr/local/go
+        #sudo tar -C /usr/local -xzf /tmp/go.tgz
+        #echo "/usr/local/go/bin" >> $GITHUB_PATH
+        #export PATH="/usr/local/go/bin:$PATH"
+        #go version
+        # 确认是完整 GOROOT（要有 bin/go）
+        #test -x /usr/local/go/bin/go
+        #ls /usr/local/go/bin/go
+        
+    # 1. 必须先用 apt 安装系统级的 ccache 工具！
+    - name: Install Ccache host tool
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ccache
+
+    # 2. 设置环境变量与缓存目录
+    - name: Set global Ccache env
+      run: |
+        mkdir -p ~/.ccache
+        echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
+        echo "/usr/lib/ccache" >> $GITHUB_PATH
+        
+    # 3. 恢复/保存 Actions 缓存
+    - name: Cache Ccache Files
+      uses: actions/cache@v4
+      with:
+        path: ~/.ccache
+        key: ${{ runner.os }}-openwrt-ccache-an7581-${{ github.ref_name }}
+        restore-keys: |
+          ${{ runner.os }}-openwrt-ccache-an7581-${{ github.ref_name }}
+          ${{ runner.os }}-openwrt-ccache-an7581-
+          ${{ runner.os }}-openwrt-ccache-
+    
+    - name: Cache Host Tools
+      uses: actions/cache@v4
+      with:
+        path: |
+          /workdir/openwrt/staging_dir/host
+          /workdir/openwrt/staging_dir/hostpkg
+        # 不要用 hashFiles(feeds/...)，除非放在 feeds update 之后且路径带 openwrt/
+        key: ${{ runner.os }}-openwrt-host-an7581-${{ github.ref_name }}-v3
+        restore-keys: |
+          ${{ runner.os }}-openwrt-host-an7581-${{ github.ref_name }}-
+          ${{ runner.os }}-openwrt-host-an7581-
+
+    # 4. 初始化 ccache 参数
+    - name: Init Ccache Config
+      run: |
+        mkdir -p ~/.ccache
+        ccache -M 10G
+        ccache -o compression=true
+        ccache -z
+    
+    - name: Load custom feeds
+      run: |
+        [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
+        chmod +x $DIY_P1_SH
+        cd openwrt
+        $GITHUB_WORKSPACE/$DIY_P1_SH
+    
+    - name: Clean feeds
+      run: |
+        cd openwrt
+        #rm -rf feeds
+        ./scripts/feeds clean 2>/dev/null || true
+        rm -rf feeds package/feeds
+        
+    - name: Update feeds
+      run: cd openwrt && ./scripts/feeds update -a
+
+    - name: Install feeds
+      run: cd openwrt && ./scripts/feeds install -a
+
+    - name: Load custom configuration
+      run: |
+        [ -e files ] && mv files openwrt/files
+        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
+        chmod +x $DIY_P2_SH
+        cd openwrt
+        $GITHUB_WORKSPACE/$DIY_P2_SH
+
+    - name: Download package
+      id: package
+      run: |
+        cd openwrt
+    
+        # 启用 ccache
+        echo "CONFIG_CCACHE=y" >> .config
+    
+        # =========================================================
+        # Go 配置：使用 OpenWrt 内部 Go（不依赖外部）
+        # =========================================================
+        echo ">>> 配置使用 OpenWrt 内部 Go..."
+    
+        # 确保不使用外部 Go
+        sed -i '/CONFIG_USE_EXTERNAL_HOST_GOLANG/d' .config
+        echo "# CONFIG_USE_EXTERNAL_HOST_GOLANG is not set" >> .config
+    
+        # 确保不设置外部 Go 路径
+        sed -i '/CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT/d' .config
+        echo "# CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT is not set" >> .config
+    
+        # 启用内部 Go 编译（bootstrap）
+        sed -i '/CONFIG_GOLANG_BUILD_BOOTSTRAP/d' .config
+        echo "CONFIG_GOLANG_BUILD_BOOTSTRAP=y" >> .config
+    
+        # =========================================================
+        # Rust 配置：禁用外部 Rust，禁用 SS-Rust
+        # =========================================================
+        echo ">>> 禁用 Rust 相关..."
+        sed -i '/CONFIG_USE_EXTERNAL_HOST_RUST/d' .config
+        echo "# CONFIG_USE_EXTERNAL_HOST_RUST is not set" >> .config
+    
+        # =========================================================
+        # 强制选中需要的包
+        # =========================================================
+        for pkg in \
+          airoha-en7581-npu-firmware \
+          luci-app-airoha-npu \
+          luci-i18n-airoha-npu-zh-cn \
+          vlmcsd \
+          luci-app-vlmcsd \
+          luci-i18n-vlmcsd-zh-cn
+        do
+          sed -i "s/# CONFIG_PACKAGE_${pkg} is not set/CONFIG_PACKAGE_${pkg}=y/" .config 2>/dev/null || true
+          grep -q "CONFIG_PACKAGE_${pkg}=y" .config || echo "CONFIG_PACKAGE_${pkg}=y" >> .config
+        done
+    
+        # =========================================================
+        # 生成配置
+        # =========================================================
+        make defconfig
+    
+        # =========================================================
+        # 强制关闭 SS-Rust（defconfig 可能会重新选中）
+        # =========================================================
+        for opt in \
+          luci-app-passwall2_INCLUDE_Shadowsocks_Rust_Client \
+          luci-app-passwall2_INCLUDE_Shadowsocks_Rust_Server \
+          shadowsocks-rust-sslocal \
+          shadowsocks-rust-ssserver \
+          shadowsocks-rust-ssmanager \
+          shadowsocks-rust-ssurl \
+          shadowsocks-rust-ssservice
+        do
+          sed -i "/CONFIG_PACKAGE_${opt}/d" .config
+          echo "# CONFIG_PACKAGE_${opt} is not set" >> .config
+        done
+    
+        # 再次 defconfig 确认
+        make defconfig
+    
+        # 再次关闭可能被重新选中的 SS-Rust
+        for opt in \
+          luci-app-passwall2_INCLUDE_Shadowsocks_Rust_Client \
+          luci-app-passwall2_INCLUDE_Shadowsocks_Rust_Server \
+          shadowsocks-rust-sslocal \
+          shadowsocks-rust-ssserver \
+          shadowsocks-rust-ssmanager \
+          shadowsocks-rust-ssurl \
+          shadowsocks-rust-ssservice
+        do
+          sed -i "/CONFIG_PACKAGE_${opt}/d" .config
+          echo "# CONFIG_PACKAGE_${opt} is not set" >> .config
+        done
+    
+        # =========================================================
+        # 诊断输出
+        # =========================================================
+        echo "========== Go 配置确认 =========="
+        grep -E 'GOLANG_EXTERNAL_BOOTSTRAP|GOLANG_BUILD_BOOTSTRAP|USE_EXTERNAL_HOST_GOLANG' .config || true
+    
+        echo "========== Rust / SS-Rust 诊断 =========="
+        grep -E 'Shadowsocks_Rust|shadowsocks-rust|EXTERNAL_HOST_RUST|PACKAGE_rust' .config || true
+    
+        # =========================================================
+        # 下载源码
+        # =========================================================
+        make download -j8
+        find dl -size -1024c -exec ls -l {} \;
+        find dl -size -1024c -exec rm -f {} \;
+        
+    - name: Debug Check Custom Changes
+      run: |
+        cd openwrt
+    
+        echo "========== 1. .config 关键包是否选中 =========="
+        grep -E "CONFIG_PACKAGE_(airoha-en7581-npu-firmware|luci-app-airoha-npu|luci-i18n-airoha-npu|vlmcsd|luci-app-vlmcsd)=y" .config || echo "⚠️ 以上包有缺失"
+    
+        echo ""
+        echo "========== 2. package/ 目录是否有 luci-app-airoha-npu =========="
+        if [ -d "package/luci-app-airoha-npu" ]; then
+          echo "✔ package/luci-app-airoha-npu 存在"
+          ls package/luci-app-airoha-npu/
+        else
+          echo "❌ package/luci-app-airoha-npu 不存在！clone 失败"
+        fi
+    
+        echo ""
+        echo "========== 3. feeds 里是否有 vlmcsd =========="
+        find feeds -type d -name "*vlmcsd*" 2>/dev/null || echo "❌ feeds 里找不到 vlmcsd"
+    
+        echo ""
+        echo "========== 4. 最终确认关键 CONFIG 行 =========="
+        grep -n "airoha-npu\|vlmcsd\|airoha-en7581-npu" .config || true
+
+    - name: Compile the firmware
+      id: compile
+      run: |
+        cd openwrt
+
+        # 1. Ccache
+        export CCACHE_DIR=/home/runner/.ccache
+        export CCACHE_BASEDIR=/workdir/openwrt
+        export CCACHE_COMPILERCHECK=content
+        export BUILD_LOG=1
+
+        mkdir -p staging_dir/host/bin
+        ln -sf /usr/bin/ccache staging_dir/host/bin/ccache 2>/dev/null || true
+
+        # 2. 编译
+        echo -e "$(nproc) thread compile"
+        make -j$(nproc) || make -j1 V=s
+        
+        # 4. 打印 Ccache 命中统计
+        echo "========== Ccache Hit Rate =========="
+        ccache -s
+        echo "===================================="
+
+        # 5. 精确提取并打印各 Package 编译耗时排行榜 (Top 30)
+        echo "=================================================="
+        echo "          📦 各 Package 编译耗时排行榜 (Top 30)    "
+        echo "=================================================="
+        
+        # 穿透 logs 目录下所有层级，查找包含 time: 的日志行
+        if [ -d "logs" ]; then
+          find logs/ -type f -exec grep -H "^time:" {} + | awk -F'#' '{
+            split($1, a, " "); 
+            pkg = a[2]; 
+            time = $4; 
+            if (time != "") printf "%7.2f 秒 (%2d 分 %02.0f 秒)  <--  %s\n", time, time/60, time%60, pkg
+          }' | sort -nr | head -n 30
+          
+          echo "--------------------------------------------------"
+          echo "📊 检查摘要: 成功匹配了 $(find logs/ -type f -exec grep -l "^time:" {} + | wc -l) 个 package 日志。"
+        else
+          echo "⚠️ 未找到 logs 目录"
+        fi
+        echo "=================================================="
+
+        echo "status=success" >> $GITHUB_OUTPUT
+        grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
+        [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
+        echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+
+    # 打包上传 openwrt/logs 目录供下载查看
+    - name: Upload Build Logs Artifact
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: openwrt-build-logs
+        path: openwrt/logs/
+
+    - name: Check Ccache Stats
+      run: |
+        ccache -s
+        
+    - name: Check space usage
+      if: (!cancelled())
+      run: df -hT
+
+    - name: Upload bin directory
+      uses: actions/upload-artifact@v4
+      if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
+      with:
+        name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        path: openwrt/bin
+
+    - name: Organize files
+      id: organize
+      if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
+      run: |
+        # 1. 进入 OpenWrt 官方唯一的标准产物输出目录
+        cd openwrt/bin/targets/*/*
+        
+        # 2. 清理仅用于本地 opkg 的 packages 目录
+        rm -rf packages
+
+        # 3. 创建 Release 临时目录
+        mkdir -p /tmp/release_files
+
+        # 4. 【OpenWrt 标准过滤】只提取具备发布和烧写意义的文件
+        # 包含：sysupgrade 固件、FIT 内核镜像(itb)、Factory/UBI 刷机包(img)、 Bootloader 镜像(fip/bl2/u-boot) 及构建信息
+        for file in *; do
+          if [[ "$file" =~ \.(bin|itb|img|manifest|buildinfo)$ ]] || \
+             [[ "$file" =~ (u-boot|fip|bl2|chainload) ]]; then
+            
+            # 过滤掉体积庞大且不能直接用于烧写的 rootfs 压缩包
+            if [[ "$file" != *"rootfs"* ]]; then
+              cp -f "$file" /tmp/release_files/
+            fi
+          fi
+        done
+
+        # 5. 打印标准打包清单（包含文件大小）
+        echo "================ OpenWrt Standard Release Artifacts ================"
+        ls -lh /tmp/release_files/
+        echo "===================================================================="
+
+        echo "FIRMWARE=/tmp/release_files" >> $GITHUB_ENV
+        echo "status=success" >> $GITHUB_OUTPUT
+        
+    - name: Upload firmware directory
+      uses: actions/upload-artifact@v4
+      if: steps.organize.outputs.status == 'success' && !cancelled()
+      with:
+        name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        path: ${{ env.FIRMWARE }}
+
+    - name: Generate release tag
+      id: tag
+      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+      run: |
+        echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
+        touch release.txt
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: Upload firmware to release
+      uses: softprops/action-gh-release@v2
+      if: steps.tag.outputs.status == 'success' && !cancelled()
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.tag.outputs.release_tag }}
+        body_path: release.txt
+        files: ${{ env.FIRMWARE }}/*
+        
+    - name: Delete workflow runs
+      uses: Mattraks/delete-workflow-runs@main
+      with:
+        retain_days: 0
+        keep_minimum_runs: 5
+
+    - name: Remove old Releases
+      uses: dev-drprasad/delete-older-releases@master
+      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+      with:
+        keep_latest: 10
+        delete_tags: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
