@@ -246,7 +246,7 @@ echo ">>> [DIY-P2] 修复完成！CPU/Temp 插件与温度节点映射均已配�
 echo ">>> 配置硬件加密加速（EIP-93 + devcrypto）..."
 
 # 1. 修改内核配置片段（不会被 defconfig 冲掉）
-TARGET_CONFIG="target/linux/airoha/an7581/config-6.18"
+TARGET_CONFIG=$(find target/linux/airoha -name "config-*" | grep -E "an7581|an7583" | head -1)
 if [ -f "$TARGET_CONFIG" ]; then
     echo ">>> 修改内核配置片段: $TARGET_CONFIG"
     grep -q "^CONFIG_CRYPTO_DEV_EIP93=y" "$TARGET_CONFIG" || echo "CONFIG_CRYPTO_DEV_EIP93=y" >> "$TARGET_CONFIG"
@@ -359,6 +359,12 @@ else
 
   echo ">>> sing-box 已固定为 1.12.22，并清理相关缓存"
 fi
+
+# 强制在 .config 中启用 EIP-93（即使 defconfig 冲掉，也重新写入）
+sed -i '/CONFIG_CRYPTO_DEV_EIP93/d' .config
+echo 'CONFIG_CRYPTO_DEV_EIP93=y' >> .config
+sed -i '/CONFIG_CRYPTO_AES_ARM64_NEON_BLK/d' .config
+echo 'CONFIG_CRYPTO_AES_ARM64_NEON_BLK=y' >> .config
 
 echo "========================================="
 echo ">>> diy-part2.sh 全部执行完毕！"
