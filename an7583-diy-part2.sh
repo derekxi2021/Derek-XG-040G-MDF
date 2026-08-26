@@ -8,6 +8,41 @@ echo "========================================="
 echo ">>> 开始执行 diy-part2.sh 完整自定义脚本"
 echo "========================================="
 
+# ============================================================
+# 为 AN7583 设备树添加 EIP-93 加密节点
+# ============================================================
+echo ">>> 正在为设备树添加 EIP-93 加密节点..."
+
+# 找到 AN7583 的主设备树文件
+DTS_FILE="target/linux/airoha/dts/an7583.dtsi"
+
+if [ -f "$DTS_FILE" ]; then
+    # 检查是否已存在 crypto 节点
+    if grep -q "crypto@" "$DTS_FILE"; then
+        echo ">>> 设备树中已存在 crypto 节点，跳过添加"
+    else
+        echo ">>> 正在向 $DTS_FILE 添加 crypto 节点..."
+        
+        # 在文件末尾的 "/ { ... };" 之前插入 crypto 节点
+        # 使用 sed 在最后一个 "};" 之前插入
+        sed -i '/^};$/i \
+\
+\/* Crypto engine (EIP-93) */ \
+crypto: crypto@1e004000 { \
+    compatible = "airoha,an7583-eip93", "airoha,en7581-eip93", "inside-secure,safexcel-eip93ies"; \
+    reg = <0x0 0x1e004000 0x0 0x2000>; \
+    interrupts = <0 144 4>; \
+    status = "okay"; \
+};' "$DTS_FILE"
+        
+        echo ">>> crypto 节点已添加"
+    fi
+else
+    echo "⚠️ 警告：找不到 $DTS_FILE，跳过设备树补丁"
+fi
+
+echo ">>> 设备树处理完成"
+
 # ------------------------------------------------------------
 # 1. 配置 CPU 频率驱动 (采用源码原生 Patch + 开启内核 Config)
 # ------------------------------------------------------------
