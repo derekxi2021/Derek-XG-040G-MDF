@@ -369,11 +369,13 @@ fi
 # ============================================================
 echo ">>> [DIY-P2] 正在强制注入硬件加密内核配置..."
 
-# 追加所有必需的配置（使用 KERNEL_ 前缀确保被内核 Kconfig 识别）
+# 1. 先执行 defconfig 建立干净的基础配置
+make defconfig
+
+# 2. 追加所有必需的配置（使用 KERNEL_ 前缀确保被内核 Kconfig 识别）
 cat << 'EOF' >> .config
 CONFIG_KERNEL_CRYPTO_HW=y
 CONFIG_KERNEL_CRYPTO_DEV_EIP93=y
-CONFIG_KERNEL_CRYPTO_DEV_SAFEXCEL=y
 CONFIG_KERNEL_CRYPTO_DEV_EIP93_GENERIC_SW_MAX_LEN=256
 CONFIG_KERNEL_CRYPTO_DEV_EIP93_AES_128_SW_MAX_LEN=512
 CONFIG_KERNEL_CRYPTO_DEV_EIP93_AES=y
@@ -391,19 +393,32 @@ CONFIG_WOLFSSL_HAS_CPU_CRYPTO=y
 CONFIG_PACKAGE_openssl-util=y
 EOF
 
-# 消除可能出现的重复项
+# 3. 消除可能出现的重复项
 sort -u -o .config .config
 
-# 先让构建系统识别新增的 KERNEL_ 选项
-echo ">>> 执行 make oldconfig 解析新配置..."
-make oldconfig
+# 4. 使用 yes 自动接受所有默认值，避免交互式询问
+echo ">>> 执行 make oldconfig（自动接受默认值）..."
+yes "" | make oldconfig
 
-# 确保 EIP-93 相关选项没有被禁用
-echo ">>> 验证关键配置..."
-grep -q "CONFIG_KERNEL_CRYPTO_DEV_EIP93=y" .config || echo "⚠️ 警告：EIP-93 配置可能被禁用"
+# 5. 验证 EIP-93 是否被启用
+if grep -q "CONFIG_KERNEL_CRYPTO_DEV_EIP93=y" .config; then
+    echo ">>> ✅ EIP-93 配置已成功启用"
+else
+    echo ">>> ⚠️ EIP-93 配置被禁用，尝试强制修复..."
+    # 强制重新设置（可能因依赖问题被禁用，这里强行启用）
+    sed -i '/CONFIG_KERNEL_CRYPTO_DEV_EIP93/d' .config
+    echo "CONFIG_KERNEL_CRYPTO_DEV_EIP93=y" >> .config
+    # 再次运行 oldconfig
+    yes "" | make oldconfig
+    # 再次验证
+    if grep -q "CONFIG_KERNEL_CRYPTO_DEV_EIP93=y" .config; then
+        echo ">>> ✅ EIP-93 强制修复成功"
+    else
+        echo ">>> ❌ 仍然无法启用 EIP-93，请检查内核依赖或设备树"
+    fi
+fi
 
 echo ">>> [DIY-P2] 硬件加密配置强制注入完成。"
-
 echo "========================================="
 echo ">>> diy-part2.sh 全部执行完毕！"
 echo "========================================="
