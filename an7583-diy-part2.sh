@@ -23,11 +23,11 @@ if [ -f "$DTS_FILE" ]; then
     else
         echo ">>> 正在向 $DTS_FILE 添加 crypto 节点..."
         
-        # 在文件末尾的 "/ { ... };" 之前插入 crypto 节点
-        # 使用 sed 在最后一个 "};" 之前插入
-        sed -i '/^};$/i \
+        # 在文件末尾的 #endif 之前插入 crypto 节点
+        # 使用 sed 在最后一个 #endif 之前插入
+        sed -i '/^#endif$/i \
 \
-\/* Crypto engine (EIP-93) */ \
+/* Crypto engine (EIP-93) */ \
 crypto: crypto@1e004000 { \
     compatible = "airoha,an7583-eip93", "airoha,en7581-eip93", "inside-secure,safexcel-eip93ies"; \
     reg = <0x0 0x1e004000 0x0 0x2000>; \
@@ -38,7 +38,22 @@ crypto: crypto@1e004000 { \
         echo ">>> crypto 节点已添加"
     fi
 else
-    echo "⚠️ 警告：找不到 $DTS_FILE，跳过设备树补丁"
+    echo "⚠️ 警告：找不到 $DTS_FILE，使用备用方法..."
+    # 备用方法：直接创建补丁文件
+    mkdir -p target/linux/airoha/patches-6.18
+    cat > target/linux/airoha/patches-6.18/999-add-eip93-crypto-node.patch << 'PATCH'
+--- a/arch/arm64/boot/dts/airoha/an7583.dtsi
++++ b/arch/arm64/boot/dts/airoha/an7583.dtsi
+@@ -0,0 +1,9 @@
++/* Crypto engine (EIP-93) */
++crypto: crypto@1e004000 {
++    compatible = "airoha,an7583-eip93", "airoha,en7581-eip93", "inside-secure,safexcel-eip93ies";
++    reg = <0x0 0x1e004000 0x0 0x2000>;
++    interrupts = <0 144 4>;
++    status = "okay";
++};
+PATCH
+    echo ">>> 已创建补丁文件 999-add-eip93-crypto-node.patch"
 fi
 
 echo ">>> 设备树处理完成"
@@ -358,6 +373,7 @@ echo ">>> [DIY-P2] 正在强制注入硬件加密内核配置..."
 cat << 'EOF' >> .config
 CONFIG_KERNEL_CRYPTO_HW=y
 CONFIG_KERNEL_CRYPTO_DEV_EIP93=y
+CONFIG_KERNEL_CRYPTO_DEV_SAFEXCEL=y
 CONFIG_KERNEL_CRYPTO_DEV_EIP93_GENERIC_SW_MAX_LEN=256
 CONFIG_KERNEL_CRYPTO_DEV_EIP93_AES_128_SW_MAX_LEN=512
 CONFIG_KERNEL_CRYPTO_DEV_EIP93_AES=y
@@ -378,8 +394,13 @@ EOF
 # 消除可能出现的重复项
 sort -u -o .config .config
 
-# 让 OpenWrt 构建系统解析新配置（自动接受默认，不会中断编译）
+# 先让构建系统识别新增的 KERNEL_ 选项
+echo ">>> 执行 make oldconfig 解析新配置..."
 make oldconfig
+
+# 确保 EIP-93 相关选项没有被禁用
+echo ">>> 验证关键配置..."
+grep -q "CONFIG_KERNEL_CRYPTO_DEV_EIP93=y" .config || echo "⚠️ 警告：EIP-93 配置可能被禁用"
 
 echo ">>> [DIY-P2] 硬件加密配置强制注入完成。"
 
