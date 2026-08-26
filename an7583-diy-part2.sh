@@ -96,15 +96,35 @@ EOF
 chmod +x files/etc/uci-defaults/99-fix-wan-mac
 
 # ------------------------------------------------------------
-# 3. 集成 Airoha NPU 控制插件 (luci-app-airoha-npu)
+# 3. luci-app-airoha-npu：保留上游逻辑，Unknown 时用 dmesg 兜底
 # ------------------------------------------------------------
-echo ">>> [3/5] 正在添加 luci-app-airoha-npu 插件并修补 NPU 版本提取逻辑..."
+echo ">>> [3/5] 添加 luci-app-airoha-npu（Unknown 时 dmesg 兜底）..."
 rm -rf package/luci-app-airoha-npu
 git clone --depth=1 https://github.com/rchen14b/luci-app-airoha-npu.git package/luci-app-airoha-npu
 sed -i 's|include ../../luci.mk|include $(TOPDIR)/feeds/luci/luci.mk|' package/luci-app-airoha-npu/Makefile
 
-# 强制开启配置选中
 echo "CONFIG_PACKAGE_luci-app-airoha-npu=y" >> .config
+echo "CONFIG_PACKAGE_airoha-an7583-npu-firmware=y" >> .config
+
+TARGET_RPC=$(find package/luci-app-airoha-npu -type f -name 'luci.airoha_npu' | head -n1)
+if [ -f "$TARGET_RPC" ]; then
+  # 在上游 strings 逻辑之后、npu_loaded 之前，插入 dmesg 兜底
+  # 匹配：        [ -z "$npu_ver" ] && npu_ver="Unknown"
+  # 后面紧跟空行和 local npu_loaded
+  sed -i '/\[ -z "\$npu_ver" \] && npu_ver="Unknown"/a\
+\
+	# Fallback: dmesg when upstream TLB path yields Unknown (e.g. AN7583 without firmware-name)\
+	if [ -z "$npu_ver" ] || [ "$npu_ver" = "Unknown" ]; then\
+		npu_ver=$(dmesg 2>/dev/null | grep -i "NPU fw version" | tail -n 1 | sed -n "s/.*NPU fw version: *\\([0-9][0-9.]*\\).*/\\1/p")\
+		[ -z "$npu_ver" ] && npu_ver=$(logread 2>/dev/null | grep -i "NPU fw version" | tail -n 1 | sed -n "s/.*NPU fw version: *\\([0-9][0-9.]*\\).*/\\1/p")\
+		[ -z "$npu_ver" ] && npu_ver="Unknown"\
+	fi' "$TARGET_RPC"
+
+  echo ">>> 补丁后片段："
+  grep -n -A12 'npu_ver="Unknown"' "$TARGET_RPC" | head -20
+else
+  echo "⚠️ 未找到 luci.airoha_npu"
+fi
 
 # ------------------------------------------------------------
 # 4. 集成 KMS 激活服务 (vlmcsd & luci-app-vlmcsd)
