@@ -261,7 +261,9 @@ for pkg in \
   CRYPTO_DEV_EIP93 \
   CRYPTO_AES_ARM64_NEON_BLK \
   PACKAGE_kmod-cryptodev \
-  PACKAGE_libopenssl-devcrypto
+  PACKAGE_libopenssl-devcrypto \
+  PACKAGE_openssl-util \
+  PACKAGE_openssl
 do
   sed -i "/CONFIG_${pkg}/d" .config
   echo "CONFIG_${pkg}=y" >> .config
