@@ -235,6 +235,41 @@ EOF
 echo ">>> [DIY-P2] 修复完成！CPU/Temp 插件与温度节点映射均已配置完毕。"
 
 # =========================================================
+# 硬件加密加速：EIP-93 + NEON + devcrypto
+# =========================================================
+echo ">>> 配置硬件加密加速（EIP-93 + devcrypto）..."
+
+# 1. 清理无效的 ARMv8 Crypto Extension 配置（本 CPU 无 AES/PMULL 指令）
+echo ">>> 清理无效的 AES_ARM64_CE 配置..."
+for opt in \
+  CONFIG_CRYPTO_AES_ARM64_CE \
+  CONFIG_CRYPTO_AES_ARM64_CE_BLK \
+  CONFIG_CRYPTO_AES_ARM64_CE_CCM \
+  CONFIG_CRYPTO_GHASH_ARM64_CE \
+  CONFIG_CRYPTO_SHA3_ARM64 \
+  CONFIG_CRYPTO_SM3_ARM64_CE \
+  CONFIG_CRYPTO_SM4_ARM64_CE \
+  CONFIG_CRYPTO_AES_ARM64_BS
+do
+  sed -i "/^${opt}/d" .config 2>/dev/null || true
+  echo "# ${opt} is not set" >> .config
+done
+
+# 2. 强制启用有效的硬件加密选项
+echo ">>> 启用 EIP-93 硬件加密引擎..."
+for pkg in \
+  CRYPTO_DEV_EIP93 \
+  CRYPTO_AES_ARM64_NEON_BLK \
+  PACKAGE_kmod-cryptodev \
+  PACKAGE_libopenssl-devcrypto
+do
+  sed -i "/CONFIG_${pkg}/d" .config
+  echo "CONFIG_${pkg}=y" >> .config
+done
+
+echo ">>> 硬件加密配置已完成（EIP-93 驱动、NEON、devcrypto）"
+
+# =========================================================
 # 下载 Loyalsoldier 完整规则（覆盖官方包，保留编译依赖）
 # =========================================================
 echo ">>> 正在下载 Loyalsoldier 完整规则文件..."
