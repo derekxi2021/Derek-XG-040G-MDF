@@ -314,6 +314,40 @@ else
   echo ">>> sing-box 已固定为 1.12.22，并清理相关缓存"
 fi
 
+# ============================================================
+# [DIY-P2] 强制启用硬件加密加速 (EIP-93 和 ARMv8 AES)
+# ============================================================
+echo ">>> [DIY-P2] 正在强制注入硬件加密内核配置..."
+
+# 追加所有必需的配置（使用 KERNEL_ 前缀确保被内核 Kconfig 识别）
+cat << 'EOF' >> .config
+CONFIG_KERNEL_CRYPTO_HW=y
+CONFIG_KERNEL_CRYPTO_DEV_EIP93=y
+CONFIG_KERNEL_CRYPTO_DEV_EIP93_GENERIC_SW_MAX_LEN=256
+CONFIG_KERNEL_CRYPTO_DEV_EIP93_AES_128_SW_MAX_LEN=512
+CONFIG_KERNEL_CRYPTO_DEV_EIP93_AES=y
+CONFIG_KERNEL_CRYPTO_DEV_EIP93_DES=y
+CONFIG_KERNEL_CRYPTO_USER_API_HASH=y
+CONFIG_KERNEL_CRYPTO_USER_API_SKCIPHER=y
+CONFIG_KERNEL_CRYPTO_USER_API=y
+CONFIG_ARM64_CRYPTO_AES=y
+CONFIG_ARM64_CRYPTO_AES_NEON_BLK=y
+CONFIG_CRYPTO_AES_ARM64_CE=y
+CONFIG_CRYPTO_AES_ARM64_CE_BLK=y
+CONFIG_CRYPTO_AES_ARM64_CE_CCM=y
+CONFIG_CRYPTO_AES_ARM64_NEON_BLK=y
+CONFIG_WOLFSSL_HAS_CPU_CRYPTO=y
+CONFIG_PACKAGE_openssl-util=y
+EOF
+
+# 消除可能出现的重复项
+sort -u -o .config .config
+
+# 让 OpenWrt 构建系统解析新配置（自动接受默认，不会中断编译）
+make oldconfig
+
+echo ">>> [DIY-P2] 硬件加密配置强制注入完成。"
+
 echo "========================================="
 echo ">>> diy-part2.sh 全部执行完毕！"
 echo "========================================="
