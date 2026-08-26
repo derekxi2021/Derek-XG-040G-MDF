@@ -58,6 +58,55 @@ fi
 
 echo ">>> 设备树处理完成"
 
+# ============================================================
+# 修改 EN8811H PHY LED 配置（lan1 的 LED）
+# ============================================================
+echo ">>> 正在调整 EN8811H PHY LED 配置..."
+
+DTS_FILE="target/linux/airoha/dts/an7583.dtsi"
+
+if [ -f "$DTS_FILE" ]; then
+    # 定义要尝试的 LED 索引（可自行修改）
+    LED_INDEX=1   # 尝试 1、2、3 或 0
+    # 可选：是否启用 active-low（去掉注释即可）
+    # ACTIVE_LOW="active-low;"
+
+    # 检查 PHY 节点下是否已有 leds 子节点
+    if grep -A 20 "ethernet-phy@0f" "$DTS_FILE" | grep -q "leds"; then
+        echo ">>> 找到现有 LED 配置，将修改 reg 为 ${LED_INDEX}..."
+        # 修改 led@0 的 reg 值
+        sed -i '/ethernet-phy@0f/,/};/ {
+            s/reg = <[0-9]>/reg = <'"${LED_INDEX}"'>/
+        }' "$DTS_FILE"
+        # 如果定义了 ACTIVE_LOW，则添加
+        if [ -n "$ACTIVE_LOW" ]; then
+            sed -i '/ethernet-phy@0f/,/};/ {
+                /led@0 {/,/}/ s/};/'"${ACTIVE_LOW}"'\n\t};/
+            }' "$DTS_FILE"
+        fi
+    else
+        echo ">>> 未找到 LED 配置，正在添加..."
+        # 在 PHY 节点中添加 leds 子节点
+        sed -i '/ethernet-phy@0f/,/};/ {
+            /reg = <0x0f>/a\
+            \tleds {\
+            \t\t#address-cells = <1>;\
+            \t\t#size-cells = <0>;\
+            \t\tled@0 {\
+            \t\t\treg = <'"${LED_INDEX}"'>;\
+            \t\t\tcolor = <LED_COLOR_ID_GREEN>;\
+            \t\t\tfunction = LED_FUNCTION_LAN;\
+            \t\t\tlinux,default-trigger = "netdev";\
+            \t\t'$( [ -n "$ACTIVE_LOW" ] && echo "\t\t\tactive-low;" )'\
+            \t\t};\
+            \t};
+        }' "$DTS_FILE"
+    fi
+    echo ">>> PHY LED 配置已更新（索引=${LED_INDEX}）"
+else
+    echo "⚠️ 找不到 $DTS_FILE"
+fi
+
 # ------------------------------------------------------------
 # 1. 配置 CPU 频率驱动 (采用源码原生 Patch + 开启内核 Config)
 # ------------------------------------------------------------
