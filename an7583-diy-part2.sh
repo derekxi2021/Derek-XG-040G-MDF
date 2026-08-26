@@ -36,14 +36,11 @@ cat << 'EOF' > files/etc/uci-defaults/99-fix-wan-mac
 # 检查当前 WAN 配置是否存在且设备有效
 wan_device=$(uci -q get network.wan.device)
 if [ -n "$wan_device" ] && [ -e "/sys/class/net/$wan_device" ]; then
-    # 配置存在且设备存在 → 保留用户自定义设置，直接退出
     exit 0
 fi
 
 # 未配置或设备无效 → 初始化为 lan1
 default_dev="lan1"
-
-# 若 lan1 不存在，尝试其他 lan 口（容错，但一般不会发生）
 if [ ! -e "/sys/class/net/$default_dev" ]; then
     for dev in lan2 lan3 lan4; do
         if [ -e "/sys/class/net/$dev" ]; then
@@ -52,13 +49,11 @@ if [ ! -e "/sys/class/net/$default_dev" ]; then
         fi
     done
 fi
-
-# 仍然没有可用接口则退出
 if [ ! -e "/sys/class/net/$default_dev" ]; then
     exit 1
 fi
 
-# 获取接口 MAC 并计算 +1
+# 计算 MAC +1
 mac=$(cat "/sys/class/net/$default_dev/address" 2>/dev/null)
 if [ -n "$mac" ] && [ "$mac" != "00:00:00:00:00:00" ]; then
     prefix=$(echo "$mac" | cut -d: -f1-5)
@@ -67,7 +62,6 @@ if [ -n "$mac" ] && [ "$mac" != "00:00:00:00:00:00" ]; then
     new_mac="${prefix}:$(printf "%02x" $new_last)"
 fi
 
-# 保留原有协议（若有），否则默认 dhcp
 proto=$(uci -q get network.wan.proto)
 [ -z "$proto" ] && proto="dhcp"
 
@@ -82,9 +76,21 @@ uci set network."$default_dev"=device
 uci set network."$default_dev".name="$default_dev"
 [ -n "$new_mac" ] && uci set network."$default_dev".macaddr="$new_mac"
 
+# ★★★ 关键修复：将该端口从 br-lan 中移除 ★★★
+# 优先使用 del_list（适用于 list ports 格式）
+if uci -q get network.br-lan.ports >/dev/null 2>&1; then
+    uci del_list network.br-lan.ports="$default_dev"
+else
+    # 兼容旧式 option ports 格式
+    current=$(uci get network.br-lan.ports 2>/dev/null)
+    if [ -n "$current" ]; then
+        new=$(echo "$current" | tr ' ' '\n' | grep -v "^$default_dev$" | tr '\n' ' ' | sed 's/ $//')
+        uci set network.br-lan.ports="$new"
+    fi
+fi
+
 uci commit network
 /etc/init.d/network restart
-
 exit 0
 EOF
 chmod +x files/etc/uci-defaults/99-fix-wan-mac
