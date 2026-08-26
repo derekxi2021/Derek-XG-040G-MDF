@@ -97,6 +97,7 @@ chmod +x files/etc/uci-defaults/99-fix-wan-mac
 
 # ------------------------------------------------------------
 # 3. luci-app-airoha-npu：保留上游逻辑，Unknown 时用 dmesg 兜底
+#    （Fallback 必须在上游 if/fi 外面，否则 7583 无 npu_fw 时不会执行）
 # ------------------------------------------------------------
 echo ">>> [3/5] 添加 luci-app-airoha-npu（Unknown 时 dmesg 兜底）..."
 rm -rf package/luci-app-airoha-npu
@@ -108,20 +109,43 @@ echo "CONFIG_PACKAGE_airoha-an7583-npu-firmware=y" >> .config
 
 TARGET_RPC=$(find package/luci-app-airoha-npu -type f -name 'luci.airoha_npu' | head -n1)
 if [ -f "$TARGET_RPC" ]; then
-  # 在上游 strings 逻辑之后、npu_loaded 之前，插入 dmesg 兜底
-  # 匹配：        [ -z "$npu_ver" ] && npu_ver="Unknown"
-  # 后面紧跟空行和 local npu_loaded
-  sed -i '/\[ -z "\$npu_ver" \] && npu_ver="Unknown"/a\
-\
-	# Fallback: dmesg when upstream TLB path yields Unknown (e.g. AN7583 without firmware-name)\
-	if [ -z "$npu_ver" ] || [ "$npu_ver" = "Unknown" ]; then\
-		npu_ver=$(dmesg 2>/dev/null | grep -i "NPU fw version" | tail -n 1 | sed -n "s/.*NPU fw version: *\\([0-9][0-9.]*\\).*/\\1/p")\
-		[ -z "$npu_ver" ] && npu_ver=$(logread 2>/dev/null | grep -i "NPU fw version" | tail -n 1 | sed -n "s/.*NPU fw version: *\\([0-9][0-9.]*\\).*/\\1/p")\
-		[ -z "$npu_ver" ] && npu_ver="Unknown"\
-	fi' "$TARGET_RPC"
+  python3 - "$TARGET_RPC" << 'PY'
+import sys
+path = sys.argv[1]
+text = open(path, encoding="utf-8", errors="ignore").read()
+if "Fallback: dmesg" in text:
+    print("already patched")
+    sys.exit(0)
 
+old = """\tlocal npu_ver=\"Unknown\"
+\tif [ -n \"$npu_fw\" ] && [ -f \"$npu_fw\" ]; then
+\t\tnpu_ver=$(strings \"$npu_fw\" 2>/dev/null | grep -oE '([0-9]+\\.[0-9]+\\.[0-9]+-)?TLB[0-9.]+[-_v0-9]*' | head -1)
+\t\t[ -z \"$npu_ver\" ] && npu_ver=\"Unknown\"
+\tfi
+"""
+
+new = """\tlocal npu_ver=\"Unknown\"
+\tif [ -n \"$npu_fw\" ] && [ -f \"$npu_fw\" ]; then
+\t\tnpu_ver=$(strings \"$npu_fw\" 2>/dev/null | grep -oE '([0-9]+\\.[0-9]+\\.[0-9]+-)?TLB[0-9.]+[-_v0-9]*' | head -1)
+\t\t[ -z \"$npu_ver\" ] && npu_ver=\"Unknown\"
+\tfi
+
+\t# Fallback: dmesg when upstream yields Unknown (e.g. AN7583 without firmware-name)
+\tif [ -z \"$npu_ver\" ] || [ \"$npu_ver\" = \"Unknown\" ]; then
+\t\tnpu_ver=$(dmesg 2>/dev/null | grep -i \"NPU fw version\" | tail -n 1 | sed -n \"s/.*NPU fw version: *\\\\([0-9][0-9.]*\\\\).*/\\\\1/p\")
+\t\t[ -z \"$npu_ver\" ] && npu_ver=$(logread 2>/dev/null | grep -i \"NPU fw version\" | tail -n 1 | sed -n \"s/.*NPU fw version: *\\\\([0-9][0-9.]*\\\\).*/\\\\1/p\")
+\t\t[ -z \"$npu_ver\" ] && npu_ver=\"Unknown\"
+\tfi
+"""
+
+if old not in text:
+    print("ERROR: upstream block not found")
+    sys.exit(1)
+open(path, "w", encoding="utf-8").write(text.replace(old, new, 1))
+print("OK: patched", path)
+PY
   echo ">>> 补丁后片段："
-  grep -n -A12 'npu_ver="Unknown"' "$TARGET_RPC" | head -20
+  grep -n -A18 'local npu_ver="Unknown"' "$TARGET_RPC" | head -25
 else
   echo "⚠️ 未找到 luci.airoha_npu"
 fi
