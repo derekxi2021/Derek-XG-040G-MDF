@@ -245,29 +245,41 @@ echo ">>> [DIY-P2] 修复完成！CPU/Temp 插件与温度节点映射均已配�
 # =========================================================
 echo ">>> 配置硬件加密加速（EIP-93 + devcrypto）..."
 
-# 1. 修改内核配置片段（不会被 defconfig 冲掉）
+# 1. 修改内核配置片段（不会被 defconfig 完全冲掉）
 TARGET_CONFIG=$(find target/linux/airoha -name "config-*" | grep -E "an7581|an7583" | head -1)
 if [ -f "$TARGET_CONFIG" ]; then
     echo ">>> 修改内核配置片段: $TARGET_CONFIG"
-    grep -q "^CONFIG_CRYPTO_DEV_EIP93=y" "$TARGET_CONFIG" || echo "CONFIG_CRYPTO_DEV_EIP93=y" >> "$TARGET_CONFIG"
-    grep -q "^CONFIG_CRYPTO_AES_ARM64_NEON_BLK=y" "$TARGET_CONFIG" || echo "CONFIG_CRYPTO_AES_ARM64_NEON_BLK=y" >> "$TARGET_CONFIG"
-    echo ">>> 内核配置已更新"
+    # 添加 EIP-93 驱动及其依赖
+    for opt in \
+      CONFIG_CRYPTO_ENGINE \
+      CONFIG_CRYPTO_DEV_EIP93 \
+      CONFIG_CRYPTO_DEV_EIP93_DEBUG \
+      CONFIG_CRYPTO_AES_ARM64_NEON_BLK
+    do
+        grep -q "^${opt}=y" "$TARGET_CONFIG" || echo "${opt}=y" >> "$TARGET_CONFIG"
+    done
+    echo ">>> 内核配置片段已更新（含依赖项）"
 else
-    echo "⚠️ 警告：找不到 $TARGET_CONFIG，可能路径变化"
+    echo "⚠️ 警告：找不到内核配置片段，将直接写入 .config"
 fi
 
-# 2. 启用 ARMv8 Crypto Extension 配置（如果硬件支持，内核会自动使用）
-echo ">>> 启用 ARMv8 AES CE 配置..."
+# 2. 清理无效的 ARMv8 CE 配置（本 CPU 不支持，即使编译也不会加载）
+echo ">>> 清理无效的 AES_ARM64_CE 配置..."
 for opt in \
   CONFIG_CRYPTO_AES_ARM64_CE \
   CONFIG_CRYPTO_AES_ARM64_CE_BLK \
-  CONFIG_CRYPTO_AES_ARM64_CE_CCM
+  CONFIG_CRYPTO_AES_ARM64_CE_CCM \
+  CONFIG_CRYPTO_GHASH_ARM64_CE \
+  CONFIG_CRYPTO_SHA3_ARM64 \
+  CONFIG_CRYPTO_SM3_ARM64_CE \
+  CONFIG_CRYPTO_SM4_ARM64_CE \
+  CONFIG_CRYPTO_AES_ARM64_BS
 do
-  sed -i "/^${opt}/d" .config
-  echo "${opt}=y" >> .config
+  sed -i "/^${opt}/d" .config 2>/dev/null || true
+  echo "# ${opt} is not set" >> .config
 done
 
-# 3. 强制启用用户态加密包
+# 3. 强制启用用户态加密包（这些不会被 defconfig 冲掉）
 echo ">>> 启用用户态加密包..."
 for pkg in \
   PACKAGE_kmod-cryptodev \
@@ -278,7 +290,7 @@ do
   echo "CONFIG_${pkg}=y" >> .config
 done
 
-echo ">>> 硬件加密配置已完成（EIP-93 驱动已写入内核配置片段）"
+echo ">>> 硬件加密配置已完成（EIP-93 驱动及其依赖已写入）"
 
 # =========================================================
 # 下载 Loyalsoldier 完整规则（覆盖官方包，保留编译依赖）
@@ -360,11 +372,11 @@ else
   echo ">>> sing-box 已固定为 1.12.22，并清理相关缓存"
 fi
 
-# 强制在 .config 中启用 EIP-93（即使 defconfig 冲掉，也重新写入）
-sed -i '/CONFIG_CRYPTO_DEV_EIP93/d' .config
-echo 'CONFIG_CRYPTO_DEV_EIP93=y' >> .config
-sed -i '/CONFIG_CRYPTO_AES_ARM64_NEON_BLK/d' .config
-echo 'CONFIG_CRYPTO_AES_ARM64_NEON_BLK=y' >> .config
+# 强制在 .config 中启用 EIP-93 及其依赖（确保 defconfig 不会完全抹掉）
+for opt in CONFIG_CRYPTO_ENGINE CONFIG_CRYPTO_DEV_EIP93 CONFIG_CRYPTO_DEV_EIP93_DEBUG CONFIG_CRYPTO_AES_ARM64_NEON_BLK; do
+    sed -i "/^${opt}/d" .config
+    echo "${opt}=y" >> .config
+done
 
 echo "========================================="
 echo ">>> diy-part2.sh 全部执行完毕！"
