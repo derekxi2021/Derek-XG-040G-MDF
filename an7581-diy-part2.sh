@@ -245,7 +245,18 @@ echo ">>> [DIY-P2] 修复完成！CPU/Temp 插件与温度节点映射均已配�
 # =========================================================
 echo ">>> 配置硬件加密加速（EIP-93 + devcrypto）..."
 
-# 1. 清理无效的 ARMv8 Crypto Extension 配置（本 CPU 无 AES/PMULL 指令）
+# 1. 修改内核配置片段（不会被 defconfig 冲掉）
+TARGET_CONFIG="target/linux/airoha/an7581/config-6.18"
+if [ -f "$TARGET_CONFIG" ]; then
+    echo ">>> 修改内核配置片段: $TARGET_CONFIG"
+    grep -q "^CONFIG_CRYPTO_DEV_EIP93=y" "$TARGET_CONFIG" || echo "CONFIG_CRYPTO_DEV_EIP93=y" >> "$TARGET_CONFIG"
+    grep -q "^CONFIG_CRYPTO_AES_ARM64_NEON_BLK=y" "$TARGET_CONFIG" || echo "CONFIG_CRYPTO_AES_ARM64_NEON_BLK=y" >> "$TARGET_CONFIG"
+    echo ">>> 内核配置已更新"
+else
+    echo "⚠️ 警告：找不到 $TARGET_CONFIG，可能路径变化"
+fi
+
+# 2. 清理无效的 ARMv8 Crypto Extension 配置
 echo ">>> 清理无效的 AES_ARM64_CE 配置..."
 for opt in \
   CONFIG_CRYPTO_AES_ARM64_CE \
@@ -261,21 +272,18 @@ do
   echo "# ${opt} is not set" >> .config
 done
 
-# 2. 强制启用有效的硬件加密选项
-echo ">>> 启用 EIP-93 硬件加密引擎..."
+# 3. 强制启用用户态加密包
+echo ">>> 启用用户态加密包..."
 for pkg in \
-  CRYPTO_DEV_EIP93 \
-  CRYPTO_AES_ARM64_NEON_BLK \
   PACKAGE_kmod-cryptodev \
   PACKAGE_libopenssl-devcrypto \
-  PACKAGE_openssl-util \
-  PACKAGE_openssl
+  PACKAGE_openssl-util
 do
   sed -i "/CONFIG_${pkg}/d" .config
   echo "CONFIG_${pkg}=y" >> .config
 done
 
-echo ">>> 硬件加密配置已完成（EIP-93 驱动、NEON、devcrypto）"
+echo ">>> 硬件加密配置已完成（EIP-93 驱动已写入内核配置片段）"
 
 # =========================================================
 # 下载 Loyalsoldier 完整规则（覆盖官方包，保留编译依赖）
@@ -311,7 +319,7 @@ fi
 echo ">>> 规则文件注入完成"
 
 # =========================================================
-# 修正 Airoha PPE debugfs 路径匹配 (加在文件最末尾)
+# 修正 Airoha PPE debugfs 路径匹配
 # =========================================================
 find package/ -type f \( -name "*.lua" -o -name "*.js" -o -name "*.sh" -o -name "*.c" \) \
     -exec sed -i 's/\/sys\/kernel\/debug\/ppe0\/bind/\/sys\/kernel\/debug\/ppe\/bind/g' {} +
