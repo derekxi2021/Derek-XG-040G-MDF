@@ -256,20 +256,15 @@ else
     echo "⚠️ 警告：找不到 $TARGET_CONFIG，可能路径变化"
 fi
 
-# 2. 清理无效的 ARMv8 Crypto Extension 配置
-echo ">>> 清理无效的 AES_ARM64_CE 配置..."
+# 2. 启用 ARMv8 Crypto Extension 配置（如果硬件支持，内核会自动使用）
+echo ">>> 启用 ARMv8 AES CE 配置..."
 for opt in \
   CONFIG_CRYPTO_AES_ARM64_CE \
   CONFIG_CRYPTO_AES_ARM64_CE_BLK \
-  CONFIG_CRYPTO_AES_ARM64_CE_CCM \
-  CONFIG_CRYPTO_GHASH_ARM64_CE \
-  CONFIG_CRYPTO_SHA3_ARM64 \
-  CONFIG_CRYPTO_SM3_ARM64_CE \
-  CONFIG_CRYPTO_SM4_ARM64_CE \
-  CONFIG_CRYPTO_AES_ARM64_BS
+  CONFIG_CRYPTO_AES_ARM64_CE_CCM
 do
-  sed -i "/^${opt}/d" .config 2>/dev/null || true
-  echo "# ${opt} is not set" >> .config
+  sed -i "/^${opt}/d" .config
+  echo "${opt}=y" >> .config
 done
 
 # 3. 强制启用用户态加密包
