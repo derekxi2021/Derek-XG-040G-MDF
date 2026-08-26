@@ -9,22 +9,43 @@ echo ">>> 开始执行 diy-part2.sh 完整自定义脚本"
 echo "========================================="
 
 # ============================================================
-# 为 AN7583 设备树添加 EIP-93 加密节点
+# 1. 提前强制设置内核配置（在 defconfig 之前）
+# ============================================================
+echo ">>> 提前设置内核配置..."
+cat << 'EOF' >> .config
+CONFIG_KERNEL_CRYPTO_HW=y
+CONFIG_KERNEL_CRYPTO_DEV_EIP93=y
+CONFIG_KERNEL_CRYPTO_DEV_EIP93_GENERIC_SW_MAX_LEN=256
+CONFIG_KERNEL_CRYPTO_DEV_EIP93_AES_128_SW_MAX_LEN=512
+CONFIG_KERNEL_CRYPTO_DEV_EIP93_AES=y
+CONFIG_KERNEL_CRYPTO_DEV_EIP93_DES=y
+CONFIG_KERNEL_CRYPTO_USER_API_HASH=y
+CONFIG_KERNEL_CRYPTO_USER_API_SKCIPHER=y
+CONFIG_KERNEL_CRYPTO_USER_API=y
+CONFIG_KERNEL_ARM64_CRYPTO_AES=y
+CONFIG_KERNEL_ARM64_CRYPTO_AES_NEON_BLK=y
+CONFIG_KERNEL_CRYPTO_AES_ARM64_CE=y
+CONFIG_KERNEL_CRYPTO_AES_ARM64_CE_BLK=y
+CONFIG_KERNEL_CRYPTO_AES_ARM64_CE_CCM=y
+CONFIG_KERNEL_CRYPTO_AES_ARM64_NEON_BLK=y
+CONFIG_WOLFSSL_HAS_CPU_CRYPTO=y
+CONFIG_PACKAGE_openssl-util=y
+EOF
+
+# ============================================================
+# 2. 修改所有可能的设备树文件（提前）
 # ============================================================
 echo ">>> 正在为设备树添加 EIP-93 加密节点..."
 
-# 找到 AN7583 的主设备树文件
-DTS_FILE="target/linux/airoha/dts/an7583.dtsi"
+# 查找所有可能包含 crypto 节点的 DTS 文件
+DTS_FILES=$(find target/linux/airoha/dts/ -name "*.dtsi" -o -name "*.dts" | grep -E "an7583|xg-040g-mf")
 
-if [ -f "$DTS_FILE" ]; then
-    # 检查是否已存在 crypto 节点
+for DTS_FILE in $DTS_FILES; do
+    echo ">>> 检查 $DTS_FILE"
     if grep -q "crypto@" "$DTS_FILE"; then
         echo ">>> 设备树中已存在 crypto 节点，跳过添加"
     else
         echo ">>> 正在向 $DTS_FILE 添加 crypto 节点..."
-        
-        # 在文件末尾的 #endif 之前插入 crypto 节点
-        # 使用 sed 在最后一个 #endif 之前插入
         sed -i '/^#endif$/i \
 \
 /* Crypto engine (EIP-93) */ \
@@ -34,14 +55,13 @@ crypto: crypto@1e004000 { \
     interrupts = <0 144 4>; \
     status = "okay"; \
 };' "$DTS_FILE"
-        
-        echo ">>> crypto 节点已添加"
+        echo ">>> crypto 节点已添加至 $DTS_FILE"
     fi
-else
-    echo "⚠️ 警告：找不到 $DTS_FILE，使用备用方法..."
-    # 备用方法：直接创建补丁文件
-    mkdir -p target/linux/airoha/patches-6.18
-    cat > target/linux/airoha/patches-6.18/999-add-eip93-crypto-node.patch << 'PATCH'
+done
+
+# 备用：创建内核补丁文件
+mkdir -p target/linux/airoha/patches-6.18
+cat > target/linux/airoha/patches-6.18/999-add-eip93-crypto-node.patch << 'PATCH'
 --- a/arch/arm64/boot/dts/airoha/an7583.dtsi
 +++ b/arch/arm64/boot/dts/airoha/an7583.dtsi
 @@ -0,0 +1,9 @@
@@ -53,40 +73,31 @@ else
 +    status = "okay";
 +};
 PATCH
-    echo ">>> 已创建补丁文件 999-add-eip93-crypto-node.patch"
-fi
+echo ">>> 已创建补丁文件 999-add-eip93-crypto-node.patch"
 
 echo ">>> 设备树处理完成"
 
 # ============================================================
-# 修改 EN8811H PHY LED 配置（lan1 的 LED）
+# 修改 EN8811H PHY LED 配置（所有可能的 DTS 文件）
 # ============================================================
 echo ">>> 正在调整 EN8811H PHY LED 配置..."
 
-DTS_FILE="target/linux/airoha/dts/an7583.dtsi"
+LED_INDEX=1
+# ACTIVE_LOW="active-low;"
 
-if [ -f "$DTS_FILE" ]; then
-    # 定义要尝试的 LED 索引（可自行修改）
-    LED_INDEX=1   # 尝试 1、2、3 或 0
-    # 可选：是否启用 active-low（去掉注释即可）
-    # ACTIVE_LOW="active-low;"
+DTS_FILES=$(find target/linux/airoha/dts/ -name "*.dtsi" -o -name "*.dts" | grep -E "an7583|xg-040g-mf")
 
-    # 检查 PHY 节点下是否已有 leds 子节点
+for DTS_FILE in $DTS_FILES; do
+    if [ ! -f "$DTS_FILE" ]; then
+        continue
+    fi
+    echo ">>> 处理 $DTS_FILE"
+    
     if grep -A 20 "ethernet-phy@0f" "$DTS_FILE" | grep -q "leds"; then
-        echo ">>> 找到现有 LED 配置，将修改 reg 为 ${LED_INDEX}..."
-        # 修改 led@0 的 reg 值
-        sed -i '/ethernet-phy@0f/,/};/ {
-            s/reg = <[0-9]>/reg = <'"${LED_INDEX}"'>/
-        }' "$DTS_FILE"
-        # 如果定义了 ACTIVE_LOW，则添加
-        if [ -n "$ACTIVE_LOW" ]; then
-            sed -i '/ethernet-phy@0f/,/};/ {
-                /led@0 {/,/}/ s/};/'"${ACTIVE_LOW}"'\n\t};/
-            }' "$DTS_FILE"
-        fi
+        echo ">>> 找到现有 LED 配置，修改 reg 为 ${LED_INDEX}"
+        sed -i '/ethernet-phy@0f/,/};/ { s/reg = <[0-9]>/reg = <'"${LED_INDEX}"'>/ }' "$DTS_FILE"
     else
         echo ">>> 未找到 LED 配置，正在添加..."
-        # 在 PHY 节点中添加 leds 子节点
         sed -i '/ethernet-phy@0f/,/};/ {
             /reg = <0x0f>/a\
             \tleds {\
@@ -97,15 +108,13 @@ if [ -f "$DTS_FILE" ]; then
             \t\t\tcolor = <LED_COLOR_ID_GREEN>;\
             \t\t\tfunction = LED_FUNCTION_LAN;\
             \t\t\tlinux,default-trigger = "netdev";\
-            \t\t'$( [ -n "$ACTIVE_LOW" ] && echo "\t\t\tactive-low;" )'\
             \t\t};\
             \t};
         }' "$DTS_FILE"
     fi
-    echo ">>> PHY LED 配置已更新（索引=${LED_INDEX}）"
-else
-    echo "⚠️ 找不到 $DTS_FILE"
-fi
+done
+
+echo ">>> PHY LED 配置已更新（索引=${LED_INDEX}）"
 
 # ------------------------------------------------------------
 # 1. 配置 CPU 频率驱动 (采用源码原生 Patch + 开启内核 Config)
@@ -414,60 +423,26 @@ else
 fi
 
 # ============================================================
-# [DIY-P2] 强制启用硬件加密加速 (EIP-93 和 ARMv8 AES)
+# 强制验证并修复配置
 # ============================================================
-echo ">>> [DIY-P2] 正在强制注入硬件加密内核配置..."
+echo ">>> 强制验证硬件加密配置..."
 
-# 1. 先执行 defconfig 建立干净的基础配置
-make defconfig
+# 确保 EIP-93 配置存在
+if ! grep -q "CONFIG_KERNEL_CRYPTO_DEV_EIP93=y" .config; then
+    echo ">>> EIP-93 配置缺失，强制添加..."
+    echo "CONFIG_KERNEL_CRYPTO_DEV_EIP93=y" >> .config
+fi
 
-# 2. 追加所有必需的配置（使用 KERNEL_ 前缀确保被内核 Kconfig 识别）
-cat << 'EOF' >> .config
-CONFIG_KERNEL_CRYPTO_HW=y
-CONFIG_KERNEL_CRYPTO_DEV_EIP93=y
-CONFIG_KERNEL_CRYPTO_DEV_EIP93_GENERIC_SW_MAX_LEN=256
-CONFIG_KERNEL_CRYPTO_DEV_EIP93_AES_128_SW_MAX_LEN=512
-CONFIG_KERNEL_CRYPTO_DEV_EIP93_AES=y
-CONFIG_KERNEL_CRYPTO_DEV_EIP93_DES=y
-CONFIG_KERNEL_CRYPTO_USER_API_HASH=y
-CONFIG_KERNEL_CRYPTO_USER_API_SKCIPHER=y
-CONFIG_KERNEL_CRYPTO_USER_API=y
-CONFIG_KERNEL_ARM64_CRYPTO_AES=y
-CONFIG_KERNEL_ARM64_CRYPTO_AES_NEON_BLK=y
-CONFIG_KERNEL_CRYPTO_AES_ARM64_CE=y
-CONFIG_KERNEL_CRYPTO_AES_ARM64_CE_BLK=y
-CONFIG_KERNEL_CRYPTO_AES_ARM64_CE_CCM=y
-CONFIG_KERNEL_CRYPTO_AES_ARM64_NEON_BLK=y
-CONFIG_WOLFSSL_HAS_CPU_CRYPTO=y
-CONFIG_PACKAGE_openssl-util=y
-EOF
-
-# 3. 消除可能出现的重复项
-sort -u -o .config .config
-
-# 4. 使用 yes 自动接受所有默认值，避免交互式询问
-echo ">>> 执行 make oldconfig（自动接受默认值）..."
+# 执行 oldconfig 自动接受默认
 yes "" | make oldconfig
 
-# 5. 验证 EIP-93 是否被启用
+# 再次验证
 if grep -q "CONFIG_KERNEL_CRYPTO_DEV_EIP93=y" .config; then
     echo ">>> ✅ EIP-93 配置已成功启用"
 else
-    echo ">>> ⚠️ EIP-93 配置被禁用，尝试强制修复..."
-    # 强制重新设置（可能因依赖问题被禁用，这里强行启用）
-    sed -i '/CONFIG_KERNEL_CRYPTO_DEV_EIP93/d' .config
-    echo "CONFIG_KERNEL_CRYPTO_DEV_EIP93=y" >> .config
-    # 再次运行 oldconfig
-    yes "" | make oldconfig
-    # 再次验证
-    if grep -q "CONFIG_KERNEL_CRYPTO_DEV_EIP93=y" .config; then
-        echo ">>> ✅ EIP-93 强制修复成功"
-    else
-        echo ">>> ❌ 仍然无法启用 EIP-93，请检查内核依赖或设备树"
-    fi
+    echo ">>> ❌ EIP-93 配置仍然未启用，可能依赖缺失"
 fi
 
-echo ">>> [DIY-P2] 硬件加密配置强制注入完成。"
 echo "========================================="
 echo ">>> diy-part2.sh 全部执行完毕！"
 echo "========================================="
