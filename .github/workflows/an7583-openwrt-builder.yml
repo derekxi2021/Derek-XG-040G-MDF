@@ -201,18 +201,16 @@ jobs:
         # =========================================================
         # ★★★ 关键：在 defconfig 之后，再次追加硬件加密内核选项 ★★★
         # =========================================================
-        echo ">>> 追加 EIP-93 和 ARMv8 AES 内核配置..."
-cat << 'EOF' >> .config
-CONFIG_KERNEL_CRYPTO_HW=y
-CONFIG_KERNEL_CRYPTO_DEV_EIP93=y
-CONFIG_KERNEL_CRYPTO_DEV_EIP93_AES=y
-CONFIG_KERNEL_CRYPTO_DEV_EIP93_DES=y
-CONFIG_KERNEL_CRYPTO_AES_ARM64_NEON_BLK=y
-CONFIG_KERNEL_CRYPTO_AES_ARM64_CE=y
-CONFIG_KERNEL_CRYPTO_AES_ARM64_CE_BLK=y
-CONFIG_KERNEL_ARM64_CRYPTO_AES=y
-CONFIG_KERNEL_ARM64_CRYPTO_AES_NEON_BLK=y
-EOF
+        echo ">>> 追加 EIP-93 和 ARMv8 AES 内核配置...
+        echo "CONFIG_KERNEL_CRYPTO_HW=y" >> .config
+        echo "CONFIG_KERNEL_CRYPTO_DEV_EIP93=y" >> .config
+        echo "CONFIG_KERNEL_CRYPTO_DEV_EIP93_AES=y" >> .config
+        echo "CONFIG_KERNEL_CRYPTO_DEV_EIP93_DES=y" >> .config
+        echo "CONFIG_KERNEL_CRYPTO_AES_ARM64_NEON_BLK=y" >> .config
+        echo "CONFIG_KERNEL_CRYPTO_AES_ARM64_CE=y" >> .config
+        echo "CONFIG_KERNEL_CRYPTO_AES_ARM64_CE_BLK=y" >> .config
+        echo "CONFIG_KERNEL_ARM64_CRYPTO_AES=y" >> .config
+        echo "CONFIG_KERNEL_ARM64_CRYPTO_AES_NEON_BLK=y" >> .config
       
         # 消除重复并执行 oldconfig（不是 defconfig）
         sort -u -o .config .config
