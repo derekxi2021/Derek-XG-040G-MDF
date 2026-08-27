@@ -155,70 +155,35 @@ jobs:
       id: package
       run: |
         cd openwrt
-    
-        echo "CONFIG_CCACHE=y" >> .config
-    
-        echo ">>> 配置使用 OpenWrt 内部 Go..."
-        sed -i '/CONFIG_USE_EXTERNAL_HOST_GOLANG/d' .config
-        echo "# CONFIG_USE_EXTERNAL_HOST_GOLANG is not set" >> .config
-        sed -i '/CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT/d' .config
-        echo "# CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT is not set" >> .config
-        sed -i '/CONFIG_GOLANG_BUILD_BOOTSTRAP/d' .config
-        echo "CONFIG_GOLANG_BUILD_BOOTSTRAP=y" >> .config
-    
-        echo ">>> 禁用 Rust 相关..."
-        sed -i '/CONFIG_USE_EXTERNAL_HOST_RUST/d' .config
-        echo "# CONFIG_USE_EXTERNAL_HOST_RUST is not set" >> .config
-    
-        # 强制选中需要的包
-        for pkg in \
-          airoha-an7583-npu-firmware \
-          luci-app-airoha-npu \
-          luci-i18n-airoha-npu-zh-cn \
-          vlmcsd \
-          luci-app-vlmcsd \
-          luci-i18n-vlmcsd-zh-cn \
-          openssl-util
-        do
-          sed -i "s/# CONFIG_PACKAGE_${pkg} is not set/CONFIG_PACKAGE_${pkg}=y/" .config 2>/dev/null || true
-          grep -q "CONFIG_PACKAGE_${pkg}=y" .config || echo "CONFIG_PACKAGE_${pkg}=y" >> .config
-        done
-    
+
+        echo "========================================="
+        echo ">>> 开始下载编译所需源码包"
+        echo "========================================="
+
+        # an7583.config + diy-part2.sh 负责全部编译配置
+        # 这里不再重复修改 .config，避免配置互相覆盖或产生重复项
+
+        echo "========== 当前关键配置 =========="
+        grep -E \
+          "CONFIG_TARGET_airoha_an7583|CONFIG_AIROHA_CPU_PM_DOMAIN|CONFIG_CRYPTO_DEV_EIP93|CONFIG_PACKAGE_luci-app-airoha-npu|CONFIG_PACKAGE_airoha-an7583-npu-firmware|CONFIG_PACKAGE_luci-app-passwall2|CONFIG_PACKAGE_sing-box|CONFIG_PACKAGE_xray-core|CONFIG_PACKAGE_vlmcsd|CONFIG_CCACHE" \
+          .config || true
+
+        echo "========================================="
+
+        # 根据 an7583.config + diy-part2.sh 生成最终配置
         make defconfig
-    
-        echo ">>> 追加 EIP-93 和 ARMv8 AES 内核配置..."
-        # 使用 echo 逐行追加，避免 heredoc 缩进问题
-        echo "CONFIG_KERNEL_CRYPTO_HW=y" >> .config
-        echo "CONFIG_KERNEL_CRYPTO_DEV_EIP93=y" >> .config
-        echo "CONFIG_KERNEL_CRYPTO_DEV_EIP93_AES=y" >> .config
-        echo "CONFIG_KERNEL_CRYPTO_DEV_EIP93_DES=y" >> .config
-        echo "CONFIG_KERNEL_CRYPTO_AES_ARM64_NEON_BLK=y" >> .config
-        echo "CONFIG_KERNEL_CRYPTO_AES_ARM64_CE=y" >> .config
-        echo "CONFIG_KERNEL_CRYPTO_AES_ARM64_CE_BLK=y" >> .config
-        echo "CONFIG_KERNEL_ARM64_CRYPTO_AES=y" >> .config
-        echo "CONFIG_KERNEL_ARM64_CRYPTO_AES_NEON_BLK=y" >> .config
-    
-        sort -u -o .config .config
-        yes "" | make oldconfig
-    
-        # 再次关闭可能被重新选中的 SS-Rust
-        for opt in \
-          luci-app-passwall2_INCLUDE_Shadowsocks_Rust_Client \
-          luci-app-passwall2_INCLUDE_Shadowsocks_Rust_Server \
-          shadowsocks-rust-sslocal \
-          shadowsocks-rust-ssserver \
-          shadowsocks-rust-ssmanager \
-          shadowsocks-rust-ssurl \
-          shadowsocks-rust-ssservice
-        do
-          sed -i "/CONFIG_PACKAGE_${opt}/d" .config
-          echo "# CONFIG_PACKAGE_${opt} is not set" >> .config
-        done
-    
-        echo "========== 关键内核配置检查 =========="
-        grep -E "CONFIG_KERNEL_CRYPTO_DEV_EIP93|CONFIG_KERNEL_CRYPTO_AES_ARM64_NEON_BLK" .config || true
-    
+
+        echo "========== defconfig 后关键配置 =========="
+        grep -E \
+          "CONFIG_TARGET_airoha_an7583|CONFIG_AIROHA_CPU_PM_DOMAIN|CONFIG_CRYPTO_DEV_EIP93|CONFIG_PACKAGE_luci-app-airoha-npu|CONFIG_PACKAGE_airoha-an7583-npu-firmware|CONFIG_PACKAGE_luci-app-passwall2|CONFIG_PACKAGE_sing-box|CONFIG_PACKAGE_xray-core|CONFIG_PACKAGE_vlmcsd|CONFIG_CCACHE" \
+          .config || true
+
+        echo "========================================="
+
+        # 下载所有编译依赖
         make download -j8
+
+        # 删除异常的小文件
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
 
