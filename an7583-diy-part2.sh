@@ -11,9 +11,11 @@ echo "========================================="
 # ============================================================
 # 直接修改内核配置文件（target 级别，不会被 defconfig 重置）
 # ============================================================
-echo ">>> 正在修改内核配置文件（target/linux/airoha/config-6.18）..."
+echo ">>> 正在修改内核配置文件（target/linux/airoha/config-*）..."
 
-KERNEL_CONFIG="target/linux/airoha/config-6.18"
+# 动态查找内核配置文件
+KERNEL_CONFIG=$(find target/linux/airoha/ -maxdepth 1 -name "config-*" 2>/dev/null | head -1)
+
 if [ -f "$KERNEL_CONFIG" ]; then
     # 检查并添加 EIP-93 相关配置
     for opt in \
