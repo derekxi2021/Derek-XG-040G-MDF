@@ -8,101 +8,6 @@ echo "========================================="
 echo ">>> 开始执行 diy-part2.sh 完整自定义脚本"
 echo "========================================="
 
-# ============================================================
-# 直接修改内核配置文件（target 级别，不会被 defconfig 重置）
-# ============================================================
-echo ">>> 正在修改内核配置文件（target/linux/airoha/config-*）..."
-
-# 动态查找内核配置文件
-KERNEL_CONFIG=$(find target/linux/airoha/ -maxdepth 1 -name "config-*" 2>/dev/null | head -1)
-
-if [ -f "$KERNEL_CONFIG" ]; then
-    # 检查并添加 EIP-93 相关配置
-    for opt in \
-      "CONFIG_CRYPTO_HW=y" \
-      "CONFIG_CRYPTO_DEV_EIP93=y" \
-      "CONFIG_CRYPTO_DEV_EIP93_AES=y" \
-      "CONFIG_CRYPTO_DEV_EIP93_DES=y" \
-      "CONFIG_CRYPTO_AES_ARM64_NEON_BLK=y" \
-      "CONFIG_CRYPTO_AES_ARM64_CE=y" \
-      "CONFIG_CRYPTO_AES_ARM64_CE_BLK=y" \
-      "CONFIG_ARM64_CRYPTO_AES=y" \
-      "CONFIG_ARM64_CRYPTO_AES_NEON_BLK=y"
-    do
-        opt_name="${opt%=*}"
-        if ! grep -q "^${opt_name}=" "$KERNEL_CONFIG"; then
-            echo "$opt" >> "$KERNEL_CONFIG"
-            echo ">>> 已添加 $opt"
-        else
-            echo ">>> $opt 已存在"
-        fi
-    done
-    echo ">>> 内核配置文件修改完成"
-    echo ">>> 当前 $KERNEL_CONFIG 中的 EIP-93 相关配置："
-    grep -E "CRYPTO_DEV_EIP93|CRYPTO_AES_ARM64_NEON" "$KERNEL_CONFIG" || true
-else
-    echo "⚠️ 未找到 $KERNEL_CONFIG，跳过"
-fi
-
-# ============================================================
-# 1. 提前强制设置内核配置（在 defconfig 之前）
-# ============================================================
-echo ">>> 提前设置内核配置..."
-cat << 'EOF' >> .config
-CONFIG_KERNEL_CRYPTO_HW=y
-CONFIG_KERNEL_CRYPTO_DEV_EIP93=y
-CONFIG_KERNEL_CRYPTO_DEV_EIP93_GENERIC_SW_MAX_LEN=256
-CONFIG_KERNEL_CRYPTO_DEV_EIP93_AES_128_SW_MAX_LEN=512
-CONFIG_KERNEL_CRYPTO_DEV_EIP93_AES=y
-CONFIG_KERNEL_CRYPTO_DEV_EIP93_DES=y
-CONFIG_KERNEL_CRYPTO_USER_API_HASH=y
-CONFIG_KERNEL_CRYPTO_USER_API_SKCIPHER=y
-CONFIG_KERNEL_CRYPTO_USER_API=y
-CONFIG_KERNEL_ARM64_CRYPTO_AES=y
-CONFIG_KERNEL_ARM64_CRYPTO_AES_NEON_BLK=y
-CONFIG_KERNEL_CRYPTO_AES_ARM64_CE=y
-CONFIG_KERNEL_CRYPTO_AES_ARM64_CE_BLK=y
-CONFIG_KERNEL_CRYPTO_AES_ARM64_CE_CCM=y
-CONFIG_KERNEL_CRYPTO_AES_ARM64_NEON_BLK=y
-CONFIG_WOLFSSL_HAS_CPU_CRYPTO=y
-CONFIG_PACKAGE_openssl-util=y
-EOF
-
-# ============================================================
-# 2. 修改设备树文件（只处理基础 DTS，确保 crypto 节点启用）
-# ============================================================
-echo ">>> 正在启用设备树中的 EIP-93 加密节点..."
-
-DTS_BASE="target/linux/airoha/dts/an7583.dtsi"
-if [ ! -f "$DTS_BASE" ]; then
-    echo "⚠️ 未找到 $DTS_BASE，跳过设备树修改"
-else
-    # 检查是否已有 crypto 节点定义
-    if grep -q "crypto@" "$DTS_BASE"; then
-        echo ">>> 找到 crypto 节点，确保 status 为 okay"
-        # 将 crypto 节点内的 status 从 disabled 改为 okay
-        sed -i '/crypto@1e004000/,/}/ s/status = "disabled"/status = "okay"/g' "$DTS_BASE"
-        echo ">>> 已启用 crypto 节点"
-    else
-        echo ">>> 未找到 crypto 节点，添加完整定义"
-        # 在文件末尾（#endif 之前）添加完整节点
-        sed -i '/^#endif$/i \
-\
-/* Crypto engine (EIP-93) */ \
-crypto: crypto@1e004000 { \
-    compatible = "airoha,an7583-eip93", "airoha,en7581-eip93", "inside-secure,safexcel-eip93ies"; \
-    reg = <0x0 0x1e004000 0x0 0x2000>; \
-    interrupts = <0 144 4>; \
-    status = "okay"; \
-};' "$DTS_BASE"
-        echo ">>> crypto 节点已添加"
-    fi
-    # 可选：验证修改
-    grep -A 10 "crypto@" "$DTS_BASE" || true
-fi
-
-echo ">>> 设备树处理完成"
-
 # ------------------------------------------------------------
 # 1. 配置 CPU 频率驱动 (采用源码原生 Patch + 开启内核 Config)
 # ------------------------------------------------------------
@@ -112,11 +17,14 @@ echo ">>> [1/5] 正在配置 CPU 频率与 PM Domain 驱动..."
 rm -rf target/linux/airoha/files/drivers/pmdomain/mediatek/airoha-cpu-pmdomain.c
 rm -rf target/linux/airoha/files/drivers/pmdomain/mediatek/Makefile
 
-# 2. 同步开启 target 层级的内核配置宏，让原生 221-02 Patch 的驱动生效
-find target/linux/airoha/ -name "config-*" | while read -r config_file; do
-    grep -q "CONFIG_AIROHA_CPU_PM_DOMAIN" "$config_file" || echo "CONFIG_AIROHA_CPU_PM_DOMAIN=y" >> "$config_file"
+# 只修改 Airoha target 自己的 kernel config，避免污染其他 target
+find target/linux/airoha/ -type f -name "config-*" | while read -r config_file; do
+    if grep -q '^CONFIG_AIROHA_CPU_PM_DOMAIN=' "$config_file"; then
+        sed -i 's/^CONFIG_AIROHA_CPU_PM_DOMAIN=.*/CONFIG_AIROHA_CPU_PM_DOMAIN=y/' "$config_file"
+    else
+        echo "CONFIG_AIROHA_CPU_PM_DOMAIN=y" >> "$config_file"
+    fi
 done
-
 # ------------------------------------------------------------
 # 2. 注入 WAN MAC 地址 +1 规则 (uci-defaults 首次启动生效，支持保留配置升级)
 # ------------------------------------------------------------
@@ -199,7 +107,11 @@ chmod +x files/etc/uci-defaults/99-fix-wan-mac
 echo ">>> [3/5] 添加 luci-app-airoha-npu（Unknown 时 dmesg 兜底）..."
 rm -rf package/luci-app-airoha-npu
 git clone --depth=1 https://github.com/rchen14b/luci-app-airoha-npu.git package/luci-app-airoha-npu
-sed -i 's|include ../../luci.mk|include $(TOPDIR)/feeds/luci/luci.mk|' package/luci-app-airoha-npu/Makefile
+if [ -f package/luci-app-airoha-npu/Makefile ]; then
+    sed -i \
+        's|include ../../luci.mk|include $(TOPDIR)/feeds/luci/luci.mk|g' \
+        package/luci-app-airoha-npu/Makefile
+fi
 
 echo "CONFIG_PACKAGE_luci-app-airoha-npu=y" >> .config
 echo "CONFIG_PACKAGE_airoha-an7583-npu-firmware=y" >> .config
@@ -312,7 +224,11 @@ git clone --depth=1 https://github.com/gSpotx2f/luci-app-temp-status.git package
 
 # 3. 注入 MTK/Airoha CPU 温度节点修复补丁 (防止概览卡片漏显温度)
 echo ">>> [DIY-P2] 正在修补 LuCI 概览页 CPU 温度读取节点..."
-find package/ -type f \( -name "luci" -o -name "10_system.js" \) -exec sed -i 's|/sys/class/hwmon/hwmon.*/temp1_input|/sys/class/thermal/thermal_zone0/temp|g' {} + 2>/dev/null || true
+find package/luci-base package/luci-mod-status package/luci-app-cpu-status package/luci-app-temp-status \
+    -type f \( -name "*.js" -o -name "*.lua" \) \
+    -exec sed -i \
+    's|/sys/class/hwmon/hwmon.*/temp1_input|/sys/class/thermal/thermal_zone0/temp|g' {} + \
+    2>/dev/null || true
 
 # ============================================================
 # [DIY-P2] 4. 重建索引树并安全注入配置
@@ -332,46 +248,64 @@ EOF
 echo ">>> [DIY-P2] 修复完成！CPU/Temp 插件与温度节点映射均已配置完毕。"
 
 # =========================================================
-# 下载 Loyalsoldier 完整规则（覆盖官方包，保留编译依赖）
+# 下载 Loyalsoldier 完整规则
 # =========================================================
 echo ">>> 正在下载 Loyalsoldier 完整规则文件..."
 
-# 注意：不删除/禁用 CONFIG_PACKAGE_v2ray-geoip 和 v2ray-geosite
-# 因为 sing-box 和 xray 编译时需要它们作为依赖
-# 但运行时，我们的 files/ 目录会覆盖官方规则文件
+mkdir -p files/usr/share/v2ray
 
-# 1. 清理旧目录并创建新目录
-rm -rf files/usr/share/xray files/usr/share/v2ray
-mkdir -p files/usr/share/v2ray/
-mkdir -p files/usr/share/xray
+# 只清理本次要覆盖的规则文件
+rm -f files/usr/share/v2ray/geosite.dat
+rm -f files/usr/share/v2ray/geoip.dat
 
-# 2. 下载 Loyalsoldier 规则（比官方更全）
-wget -qO files/usr/share/v2ray/geosite.dat https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat
-wget -qO files/usr/share/v2ray/geoip.dat https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat
+RULE_OK=1
 
-# 3. 为 xray 创建软链接（同一份文件供两个工具使用）
-ln -sf ../v2ray/geosite.dat files/usr/share/xray/geosite.dat 2>/dev/null || true
-ln -sf ../v2ray/geoip.dat files/usr/share/xray/geoip.dat 2>/dev/null || true
-
-# 4. 验证下载
-if [ -f files/usr/share/v2ray/geosite.dat ] && [ -f files/usr/share/v2ray/geoip.dat ]; then
-    echo ">>> ✅ 规则文件下载成功，文件大小："
-    du -sh files/usr/share/v2ray/*.dat
-else
-    echo "⚠️ 警告：规则文件下载失败，请检查网络！"
-    echo ">>> 将使用官方包自带的规则文件作为备选"
+if ! wget -qO files/usr/share/v2ray/geosite.dat \
+    https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat; then
+    RULE_OK=0
 fi
 
-echo ">>> 规则文件注入完成"
+if ! wget -qO files/usr/share/v2ray/geoip.dat \
+    https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat; then
+    RULE_OK=0
+fi
+
+if [ "$RULE_OK" = "1" ] && \
+   [ -s files/usr/share/v2ray/geosite.dat ] && \
+   [ -s files/usr/share/v2ray/geoip.dat ]; then
+
+    echo ">>> ✅ Loyalsoldier 规则下载成功"
+    echo ">>> geosite.dat:"
+    du -h files/usr/share/v2ray/geosite.dat
+    echo ">>> geoip.dat:"
+    du -h files/usr/share/v2ray/geoip.dat
+else
+    echo ">>> ⚠️ Loyalsoldier 规则下载失败"
+    echo ">>> ⚠️ 不中止编译，将使用官方包提供的规则文件"
+
+    rm -f files/usr/share/v2ray/geosite.dat
+    rm -f files/usr/share/v2ray/geoip.dat
+fi
+
+echo ">>> 规则文件处理完成"
 
 # =========================================================
-# 修正 Airoha PPE debugfs 路径匹配 (加在文件最末尾)
+# 修正 Airoha PPE debugfs 路径
 # =========================================================
-find package/ -type f \( -name "*.lua" -o -name "*.js" -o -name "*.sh" -o -name "*.c" \) \
-    -exec sed -i 's/\/sys\/kernel\/debug\/ppe0\/bind/\/sys\/kernel\/debug\/ppe\/bind/g' {} +
 
-find package/ -type f \( -name "*.lua" -o -name "*.js" -o -name "*.sh" -o -name "*.c" \) \
-    -exec sed -i 's/\/sys\/kernel\/debug\/ppe0\/entries/\/sys\/kernel\/debug\/ppe\/entries/g' {} +
+echo ">>> [DIY-P2] 修正 Airoha PPE debugfs 路径..."
+
+find package/ -type f \
+    \( -name "*.lua" -o -name "*.js" -o -name "*.sh" -o -name "*.c" \) \
+    -exec sed -i \
+    's|/sys/kernel/debug/ppe0/bind|/sys/kernel/debug/ppe/bind|g' {} + \
+    2>/dev/null || true
+
+find package/ -type f \
+    \( -name "*.lua" -o -name "*.js" -o -name "*.sh" -o -name "*.c" \) \
+    -exec sed -i \
+    's|/sys/kernel/debug/ppe0/entries|/sys/kernel/debug/ppe/entries|g' {} + \
+    2>/dev/null || true
 
 # ============================================================
 # sing-box go依赖错误补丁：钉死 sing-box 版本，避开 Go1.27 + json 编译错误
@@ -411,22 +345,24 @@ else
   echo ">>> sing-box 已固定为 1.12.22，并清理相关缓存"
 fi
 
-# ============================================================
-# 强制验证并修复配置
-# ============================================================
 echo ">>> 强制验证硬件加密配置..."
 
-# 确保 EIP-93 配置存在
-if ! grep -q "CONFIG_KERNEL_CRYPTO_DEV_EIP93=y" .config; then
-    echo ">>> EIP-93 配置缺失，强制添加..."
-    echo "CONFIG_KERNEL_CRYPTO_DEV_EIP93=y" >> .config
+if grep -q '^# CONFIG_KERNEL_CRYPTO_DEV_EIP93 is not set' .config; then
+    sed -i \
+        's/^# CONFIG_KERNEL_CRYPTO_DEV_EIP93 is not set/CONFIG_KERNEL_CRYPTO_DEV_EIP93=y/' \
+        .config
+elif grep -q '^CONFIG_KERNEL_CRYPTO_DEV_EIP93=' .config; then
+    sed -i \
+        's/^CONFIG_KERNEL_CRYPTO_DEV_EIP93=.*/CONFIG_KERNEL_CRYPTO_DEV_EIP93=y/' \
+        .config
+else
+    echo 'CONFIG_KERNEL_CRYPTO_DEV_EIP93=y' >> .config
 fi
 
-# 检查 EIP-93 配置是否存在（但不要执行 oldconfig）
-if grep -q "CONFIG_KERNEL_CRYPTO_DEV_EIP93=y" .config; then
-    echo ">>> ✅ EIP-93 配置已存在"
+if grep -q '^CONFIG_KERNEL_CRYPTO_DEV_EIP93=y' .config; then
+    echo ">>> ✅ EIP-93 配置已启用"
 else
-    echo ">>> ⚠️ EIP-93 配置未找到，将在 Download package 步骤中追加"
+    echo ">>> ⚠️ EIP-93 配置未启用"
 fi
 
 echo "========================================="
