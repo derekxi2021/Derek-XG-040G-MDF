@@ -250,11 +250,11 @@ EOF
 echo ">>> [DIY-P2] 修复完成！CPU/Temp 插件与温度节点映射均已配置完毕。"
 
 # =========================================================
-# 硬件加密：EIP-93（target config-* + CONFIG_KERNEL_*）
+# 硬件加密：EIP-93（target config-* + .config）
 # =========================================================
 echo ">>> 配置 EIP-93 硬件加密..."
 
-# 1) 写入 target/linux/airoha/config-6.x（真正进内核）
+# 1) 写入 target/linux/airoha/config-*（直接写 CONFIG_*）
 KERNEL_CONFIG=$(find target/linux/airoha -maxdepth 1 -name 'config-*' | head -n1)
 if [ -f "$KERNEL_CONFIG" ]; then
   echo ">>> 写入内核片段: $KERNEL_CONFIG"
@@ -274,14 +274,14 @@ else
   echo "⚠️ 未找到 target/linux/airoha/config-*"
 fi
 
-# 2) .config 必须用 CONFIG_KERNEL_ 前缀
+# 2) .config 直接写 CONFIG_*（不加 KERNEL_）
 for opt in \
-  CONFIG_KERNEL_CRYPTO_HW \
-  CONFIG_KERNEL_CRYPTO_ENGINE \
-  CONFIG_KERNEL_CRYPTO_DEV_EIP93 \
-  CONFIG_KERNEL_CRYPTO_DEV_EIP93_AES \
-  CONFIG_KERNEL_CRYPTO_DEV_EIP93_DES \
-  CONFIG_KERNEL_CRYPTO_AES_ARM64_NEON_BLK
+  CONFIG_CRYPTO_HW \
+  CONFIG_CRYPTO_ENGINE \
+  CONFIG_CRYPTO_DEV_EIP93 \
+  CONFIG_CRYPTO_DEV_EIP93_AES \
+  CONFIG_CRYPTO_DEV_EIP93_DES \
+  CONFIG_CRYPTO_AES_ARM64_NEON_BLK
 do
   sed -i "/^${opt}=/d;/^# ${opt} is not set/d" .config
   echo "${opt}=y" >> .config
@@ -289,15 +289,15 @@ done
 
 # 3) 关闭无效 CE
 for opt in \
-  CONFIG_KERNEL_CRYPTO_AES_ARM64_CE \
-  CONFIG_KERNEL_CRYPTO_AES_ARM64_CE_BLK \
-  CONFIG_KERNEL_CRYPTO_AES_ARM64_CE_CCM
+  CONFIG_CRYPTO_AES_ARM64_CE \
+  CONFIG_CRYPTO_AES_ARM64_CE_BLK \
+  CONFIG_CRYPTO_AES_ARM64_CE_CCM
 do
   sed -i "/^${opt}/d" .config
   echo "# ${opt} is not set" >> .config
 done
 
-# 4) 用户态
+# 4) 用户态包
 for pkg in PACKAGE_kmod-cryptodev PACKAGE_libopenssl-devcrypto PACKAGE_openssl-util; do
   sed -i "/CONFIG_${pkg}/d" .config
   echo "CONFIG_${pkg}=y" >> .config
