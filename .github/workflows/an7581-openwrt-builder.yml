@@ -255,7 +255,44 @@ jobs:
     - name: Debug Check Custom Changes
       run: |
         cd openwrt
+
+        # =========================================================
+        # 🔍 硬件加密配置状态检查
+        # =========================================================
+        echo ""
+        echo "========== 🔍 硬件加密配置状态 =========="
     
+        # 1. 检查 EIP-93 驱动
+        echo "--- CONFIG_CRYPTO_DEV_EIP93 ---"
+        grep "^CONFIG_CRYPTO_DEV_EIP93" .config || echo "❌ 未设置 (驱动未启用)"
+    
+        # 2. 检查依赖项 CONFIG_CRYPTO_ENGINE
+        echo "--- CONFIG_CRYPTO_ENGINE ---"
+        grep "^CONFIG_CRYPTO_ENGINE" .config || echo "❌ 未设置 (EIP-93 依赖缺失)"
+    
+        # 3. 检查 NEON 加速
+        echo "--- CONFIG_CRYPTO_AES_ARM64_NEON_BLK ---"
+        grep "^CONFIG_CRYPTO_AES_ARM64_NEON_BLK" .config || echo "❌ 未设置"
+    
+        # 4. 检查无效的 CE 配置是否被清理
+        echo "--- CONFIG_CRYPTO_AES_ARM64_CE 系列 (应被清理) ---"
+        grep "^CONFIG_CRYPTO_AES_ARM64_CE" .config || echo "✅ 已清理 (无 CE 配置)"
+    
+        # 5. 检查 cryptodev 用户态接口
+        echo "--- CONFIG_PACKAGE_kmod-cryptodev ---"
+        grep "^CONFIG_PACKAGE_kmod-cryptodev" .config || echo "❌ 未设置"
+    
+        # 6. 检查 openssl devcrypto 引擎
+        echo "--- CONFIG_PACKAGE_libopenssl-devcrypto ---"
+        grep "^CONFIG_PACKAGE_libopenssl-devcrypto" .config || echo "❌ 未设置"
+    
+        # 7. 检查内核配置片段（可选）
+        echo "--- 内核配置片段 (target/linux/airoha/an7581/config-6.18) ---"
+        cat target/linux/airoha/an7581/config-6.18 2>/dev/null | grep -E "EIP93|NEON_BLK|CRYPTO_ENGINE" || echo "⚠️ 片段不存在或未包含相关选项"
+    
+        echo "=========================================="
+        echo ""
+
         echo "========== 1. .config 关键包是否选中 =========="
         grep -E "CONFIG_PACKAGE_(airoha-en7581-npu-firmware|luci-app-airoha-npu|luci-i18n-airoha-npu|vlmcsd|luci-app-vlmcsd)=y" .config || echo "⚠️ 以上包有缺失"
     
