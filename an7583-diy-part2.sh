@@ -69,77 +69,37 @@ CONFIG_PACKAGE_openssl-util=y
 EOF
 
 # ============================================================
-# 2. 修改设备树文件（精确处理 crypto 节点）
+# 2. 修改设备树文件（只处理基础 DTS，确保 crypto 节点启用）
 # ============================================================
 echo ">>> 正在启用设备树中的 EIP-93 加密节点..."
 
-DTS_FILES=$(find target/linux/airoha/dts/ -name "an7583-nokia*.dts" -o -name "an7583-nokia*.dtsi" 2>/dev/null)
-if [ -z "$DTS_FILES" ]; then
-    DTS_FILES="target/linux/airoha/dts/an7583.dtsi"
+DTS_BASE="target/linux/airoha/dts/an7583.dtsi"
+if [ ! -f "$DTS_BASE" ]; then
+    echo "⚠️ 未找到 $DTS_BASE，跳过设备树修改"
+else
+    # 检查是否已有 crypto 节点定义
+    if grep -q "crypto@" "$DTS_BASE"; then
+        echo ">>> 找到 crypto 节点，确保 status 为 okay"
+        # 将 crypto 节点内的 status 从 disabled 改为 okay
+        sed -i '/crypto@1e004000/,/}/ s/status = "disabled"/status = "okay"/g' "$DTS_BASE"
+        echo ">>> 已启用 crypto 节点"
+    else
+        echo ">>> 未找到 crypto 节点，添加完整定义"
+        # 在文件末尾（#endif 之前）添加完整节点
+        sed -i '/^#endif$/i \
+\
+/* Crypto engine (EIP-93) */ \
+crypto: crypto@1e004000 { \
+    compatible = "airoha,an7583-eip93", "airoha,en7581-eip93", "inside-secure,safexcel-eip93ies"; \
+    reg = <0x0 0x1e004000 0x0 0x2000>; \
+    interrupts = <0 144 4>; \
+    status = "okay"; \
+};' "$DTS_BASE"
+        echo ">>> crypto 节点已添加"
+    fi
+    # 可选：验证修改
+    grep -A 10 "crypto@" "$DTS_BASE" || true
 fi
-
-for DTS_FILE in $DTS_FILES; do
-    if [ ! -f "$DTS_FILE" ]; then
-        continue
-    fi
-    echo ">>> 检查 $DTS_FILE"
-
-    # 1) 已有 crypto@... { ... } 节点：只在该节点内把 disabled → okay
-    if grep -qE 'crypto@[0-9a-fA-F]+' "$DTS_FILE"; then
-        awk '
-        BEGIN { in_crypto=0; depth=0 }
-        /crypto@[0-9a-fA-F]+/ {
-            in_crypto=1
-            depth=0
-        }
-        in_crypto {
-            for (i=1; i<=length($0); i++) {
-                c=substr($0,i,1)
-                if (c=="{") depth++
-                if (c=="}") depth--
-            }
-            if ($0 ~ /status[[:space:]]*=[[:space:]]*"disabled"/)
-                sub(/status[[:space:]]*=[[:space:]]*"disabled"/, "status = \"okay\"")
-            print
-            if (in_crypto && depth<=0 && /}/) in_crypto=0
-            next
-        }
-        { print }
-        ' "$DTS_FILE" > "$DTS_FILE.tmp" && mv "$DTS_FILE.tmp" "$DTS_FILE"
-        echo ">>> 已处理 crypto@ 节点内的 status"
-    fi
-
-    # 2) 已有 &crypto { ... } 覆盖节点：同样只在该块内改
-    if grep -q '&crypto' "$DTS_FILE"; then
-        awk '
-        BEGIN { in_crypto=0; depth=0 }
-        /&crypto/ {
-            in_crypto=1
-            depth=0
-        }
-        in_crypto {
-            for (i=1; i<=length($0); i++) {
-                c=substr($0,i,1)
-                if (c=="{") depth++
-                if (c=="}") depth--
-            }
-            if ($0 ~ /status[[:space:]]*=[[:space:]]*"disabled"/)
-                sub(/status[[:space:]]*=[[:space:]]*"disabled"/, "status = \"okay\"")
-            print
-            if (in_crypto && depth<=0 && /}/) in_crypto=0
-            next
-        }
-        { print }
-        ' "$DTS_FILE" > "$DTS_FILE.tmp" && mv "$DTS_FILE.tmp" "$DTS_FILE"
-        echo ">>> 已处理 &crypto 块内的 status"
-    fi
-
-    # 3) 文件里完全没有 crypto 引用时，再追加启用
-    if ! grep -qE 'crypto@[0-9a-fA-F]+|&crypto' "$DTS_FILE"; then
-        echo ">>> 未找到 crypto 节点，追加 &crypto { status = okay }"
-        printf '\n&crypto {\n\tstatus = "okay";\n};\n' >> "$DTS_FILE"
-    fi
-done
 
 echo ">>> 设备树处理完成"
 
