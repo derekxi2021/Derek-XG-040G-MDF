@@ -123,8 +123,40 @@ find target/linux/airoha/ -name "config-*" | while read -r config_file; do
 done
 
 # ------------------------------------------------------------
+# 创建独立的 LAN1 LED 启动脚本
+# ------------------------------------------------------------
+echo ">>> 创建 LAN1 LED 启动脚本..."
+
+mkdir -p files/etc/init.d
+cat << 'EOF' > files/etc/init.d/led-lan1
+#!/bin/sh /etc/rc.common
+START=99
+
+start() {
+    # 等待网络接口完全就绪
+    sleep 2
+    LED_PATH="/sys/class/leds/1fb00000.system-controller:mdio-bus@c8-mii:0f:green:lan-1"
+    if [ -d "$(dirname $LED_PATH)" ]; then
+        echo netdev > "$LED_PATH"/trigger 2>/dev/null || true
+        echo lan1 > "$LED_PATH"/device_name 2>/dev/null || true
+        echo 1 > "$LED_PATH"/link 2>/dev/null || true
+        echo 1 > "$LED_PATH"/tx 2>/dev/null || true
+        echo 1 > "$LED_PATH"/rx 2>/dev/null || true
+    fi
+}
+EOF
+
+chmod +x files/etc/init.d/led-lan1
+
+# 启用该脚本（创建符号链接到 rc.d）
+mkdir -p files/etc/rc.d
+ln -sf ../init.d/led-lan1 files/etc/rc.d/S99led-lan1
+echo ">>> LAN1 LED 启动脚本已创建并启用"
+
+# ------------------------------------------------------------
 # 2. 注入 WAN MAC 地址 +1 规则 (uci-defaults 首次启动生效，支持保留配置升级)
 # ------------------------------------------------------------
+
 echo ">>> [2/5] 正在配置 WAN MAC 地址 +1 初始化规则..."
 
 # 创建 uci-defaults 目录
@@ -191,6 +223,20 @@ fi
 
 uci commit network
 /etc/init.d/network restart
+
+# 等待网络接口完全启动
+sleep 2
+
+# 重新配置 LAN1 LED（确保 network restart 后绑定恢复）
+LED_PATH="/sys/class/leds/1fb00000.system-controller:mdio-bus@c8-mii:0f:green:lan-1"
+if [ -d "$(dirname $LED_PATH)" ]; then
+    echo netdev > "$LED_PATH"/trigger 2>/dev/null || true
+    echo lan1 > "$LED_PATH"/device_name 2>/dev/null || true
+    echo 1 > "$LED_PATH"/link 2>/dev/null || true
+    echo 1 > "$LED_PATH"/tx 2>/dev/null || true
+    echo 1 > "$LED_PATH"/rx 2>/dev/null || true
+fi
+
 exit 0
 EOF
 chmod +x files/etc/uci-defaults/99-fix-wan-mac
