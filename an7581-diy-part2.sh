@@ -22,6 +22,15 @@ find target/linux/airoha/ -name "config-*" | while read -r config_file; do
     grep -q "CONFIG_AIROHA_CPU_PM_DOMAIN" "$config_file" || echo "CONFIG_AIROHA_CPU_PM_DOMAIN=y" >> "$config_file"
 done
 
+echo ">>> 启用 DTS crypto 节点..."
+for DTS_FILE in $(find target/linux/airoha/dts -type f \( -name '*7581*' -o -name '*en7581*' -o -name 'an7581*' \) 2>/dev/null); do
+  [ -f "$DTS_FILE" ] || continue
+  if grep -qE 'crypto@|&crypto' "$DTS_FILE"; then
+    sed -i '/crypto@\|&crypto/,/^[[:space:]]*};/ s/status = "disabled";/status = "okay";/' "$DTS_FILE"
+    echo ">>> 已处理 $DTS_FILE"
+  fi
+done
+
 # ------------------------------------------------------------
 # 2. 注入 WAN MAC 地址 +1 规则 (uci-defaults 首次启动生效，支持保留配置升级)
 # ------------------------------------------------------------
@@ -241,56 +250,60 @@ EOF
 echo ">>> [DIY-P2] 修复完成！CPU/Temp 插件与温度节点映射均已配置完毕。"
 
 # =========================================================
-# 硬件加密加速：EIP-93 + NEON + devcrypto
+# 硬件加密：EIP-93（target config-* + CONFIG_KERNEL_*）
 # =========================================================
-echo ">>> 配置硬件加密加速（EIP-93 + devcrypto）..."
+echo ">>> 配置 EIP-93 硬件加密..."
 
-# 1. 修改内核配置片段（不会被 defconfig 完全冲掉）
-TARGET_CONFIG=$(find target/linux/airoha -name "config-*" | grep -E "an7581|an7583" | head -1)
-if [ -f "$TARGET_CONFIG" ]; then
-    echo ">>> 修改内核配置片段: $TARGET_CONFIG"
-    # 添加 EIP-93 驱动及其依赖
-    for opt in \
-      CONFIG_CRYPTO_ENGINE \
-      CONFIG_CRYPTO_DEV_EIP93 \
-      CONFIG_CRYPTO_DEV_EIP93_DEBUG \
-      CONFIG_CRYPTO_AES_ARM64_NEON_BLK
-    do
-        grep -q "^${opt}=y" "$TARGET_CONFIG" || echo "${opt}=y" >> "$TARGET_CONFIG"
-    done
-    echo ">>> 内核配置片段已更新（含依赖项）"
+# 1) 写入 target/linux/airoha/config-6.x（真正进内核）
+KERNEL_CONFIG=$(find target/linux/airoha -maxdepth 1 -name 'config-*' | head -n1)
+if [ -f "$KERNEL_CONFIG" ]; then
+  echo ">>> 写入内核片段: $KERNEL_CONFIG"
+  for opt in \
+    CONFIG_CRYPTO_HW \
+    CONFIG_CRYPTO_ENGINE \
+    CONFIG_CRYPTO_DEV_EIP93 \
+    CONFIG_CRYPTO_DEV_EIP93_AES \
+    CONFIG_CRYPTO_DEV_EIP93_DES \
+    CONFIG_CRYPTO_AES_ARM64_NEON_BLK
+  do
+    sed -i "/^${opt}=/d;/^# ${opt} is not set/d" "$KERNEL_CONFIG"
+    echo "${opt}=y" >> "$KERNEL_CONFIG"
+  done
+  grep -E 'CRYPTO_HW|CRYPTO_ENGINE|CRYPTO_DEV_EIP93|NEON_BLK' "$KERNEL_CONFIG" || true
 else
-    echo "⚠️ 警告：找不到内核配置片段，将直接写入 .config"
+  echo "⚠️ 未找到 target/linux/airoha/config-*"
 fi
 
-# 2. 清理无效的 ARMv8 CE 配置（本 CPU 不支持，即使编译也不会加载）
-echo ">>> 清理无效的 AES_ARM64_CE 配置..."
+# 2) .config 必须用 CONFIG_KERNEL_ 前缀
 for opt in \
-  CONFIG_CRYPTO_AES_ARM64_CE \
-  CONFIG_CRYPTO_AES_ARM64_CE_BLK \
-  CONFIG_CRYPTO_AES_ARM64_CE_CCM \
-  CONFIG_CRYPTO_GHASH_ARM64_CE \
-  CONFIG_CRYPTO_SHA3_ARM64 \
-  CONFIG_CRYPTO_SM3_ARM64_CE \
-  CONFIG_CRYPTO_SM4_ARM64_CE \
-  CONFIG_CRYPTO_AES_ARM64_BS
+  CONFIG_KERNEL_CRYPTO_HW \
+  CONFIG_KERNEL_CRYPTO_ENGINE \
+  CONFIG_KERNEL_CRYPTO_DEV_EIP93 \
+  CONFIG_KERNEL_CRYPTO_DEV_EIP93_AES \
+  CONFIG_KERNEL_CRYPTO_DEV_EIP93_DES \
+  CONFIG_KERNEL_CRYPTO_AES_ARM64_NEON_BLK
 do
-  sed -i "/^${opt}/d" .config 2>/dev/null || true
+  sed -i "/^${opt}=/d;/^# ${opt} is not set/d" .config
+  echo "${opt}=y" >> .config
+done
+
+# 3) 关闭无效 CE
+for opt in \
+  CONFIG_KERNEL_CRYPTO_AES_ARM64_CE \
+  CONFIG_KERNEL_CRYPTO_AES_ARM64_CE_BLK \
+  CONFIG_KERNEL_CRYPTO_AES_ARM64_CE_CCM
+do
+  sed -i "/^${opt}/d" .config
   echo "# ${opt} is not set" >> .config
 done
 
-# 3. 强制启用用户态加密包（这些不会被 defconfig 冲掉）
-echo ">>> 启用用户态加密包..."
-for pkg in \
-  PACKAGE_kmod-cryptodev \
-  PACKAGE_libopenssl-devcrypto \
-  PACKAGE_openssl-util
-do
+# 4) 用户态
+for pkg in PACKAGE_kmod-cryptodev PACKAGE_libopenssl-devcrypto PACKAGE_openssl-util; do
   sed -i "/CONFIG_${pkg}/d" .config
   echo "CONFIG_${pkg}=y" >> .config
 done
 
-echo ">>> 硬件加密配置已完成（EIP-93 驱动及其依赖已写入）"
+echo ">>> EIP-93 配置写入完成"
 
 # =========================================================
 # 下载 Loyalsoldier 完整规则（覆盖官方包，保留编译依赖）
