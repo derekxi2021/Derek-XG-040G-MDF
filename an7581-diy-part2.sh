@@ -250,13 +250,13 @@ EOF
 echo ">>> [DIY-P2] 修复完成！CPU/Temp 插件与温度节点映射均已配置完毕。"
 
 # =========================================================
-# 硬件加密：EIP-93（target config-* + .config）
+# 硬件加密：EIP-93（直接写入 CONFIG_*）
 # =========================================================
 echo ">>> 配置 EIP-93 硬件加密..."
 
-# 1) 写入 target/linux/airoha/config-*（直接写 CONFIG_*）
+# 1) 尝试写入 target/linux/airoha/config-*（如果存在）
 KERNEL_CONFIG=$(find target/linux/airoha -maxdepth 1 -name 'config-*' | head -n1)
-if [ -f "$KERNEL_CONFIG" ]; then
+if [ -n "$KERNEL_CONFIG" ] && [ -f "$KERNEL_CONFIG" ]; then
   echo ">>> 写入内核片段: $KERNEL_CONFIG"
   for opt in \
     CONFIG_CRYPTO_HW \
@@ -269,12 +269,11 @@ if [ -f "$KERNEL_CONFIG" ]; then
     sed -i "/^${opt}=/d;/^# ${opt} is not set/d" "$KERNEL_CONFIG"
     echo "${opt}=y" >> "$KERNEL_CONFIG"
   done
-  grep -E 'CRYPTO_HW|CRYPTO_ENGINE|CRYPTO_DEV_EIP93|NEON_BLK' "$KERNEL_CONFIG" || true
 else
-  echo "⚠️ 未找到 target/linux/airoha/config-*"
+  echo "⚠️ 未找到内核配置片段，将只修改 .config"
 fi
 
-# 2) .config 直接写 CONFIG_*（不加 KERNEL_）
+# 2) .config 直接写 CONFIG_*（主要手段）
 for opt in \
   CONFIG_CRYPTO_HW \
   CONFIG_CRYPTO_ENGINE \
@@ -287,7 +286,7 @@ do
   echo "${opt}=y" >> .config
 done
 
-# 3) 关闭无效 CE
+# 3) 关闭无效的 CE 选项
 for opt in \
   CONFIG_CRYPTO_AES_ARM64_CE \
   CONFIG_CRYPTO_AES_ARM64_CE_BLK \
