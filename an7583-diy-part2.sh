@@ -69,11 +69,11 @@ CONFIG_PACKAGE_openssl-util=y
 EOF
 
 # ============================================================
-# 2. 修改设备树文件（针对所有设备特定的 DTS）
+# 2. 修改设备树文件（只启用已有的 crypto 节点）
 # ============================================================
-echo ">>> 正在为设备树添加 EIP-93 加密节点..."
+echo ">>> 正在启用设备树中的 EIP-93 加密节点..."
 
-# 查找所有设备特定的 DTS 文件（优先匹配 nokia 相关）
+# 查找设备特定的 DTS 文件（优先匹配 nokia 相关）
 DTS_FILES=$(find target/linux/airoha/dts/ -name "an7583-nokia*.dts" -o -name "an7583-nokia*.dtsi" 2>/dev/null)
 if [ -z "$DTS_FILES" ]; then
     DTS_FILES="target/linux/airoha/dts/an7583.dtsi"
@@ -84,23 +84,27 @@ for DTS_FILE in $DTS_FILES; do
         continue
     fi
     echo ">>> 检查 $DTS_FILE"
-    if grep -q "crypto@" "$DTS_FILE"; then
-        echo ">>> 设备树中已存在 crypto 节点，跳过添加"
+    # 检查是否已有 crypto 节点（通过标签或节点名）
+    if grep -q "crypto@" "$DTS_FILE" || grep -q "&crypto" "$DTS_FILE"; then
+        # 如果存在，确保其 status 为 "okay"
+        if grep -q "status = \"disabled\"" "$DTS_FILE"; then
+            sed -i 's/status = "disabled";/status = "okay";/g' "$DTS_FILE"
+            echo ">>> 已启用 crypto 节点（将 status 改为 okay）"
+        else
+            echo ">>> crypto 节点已存在且未被禁用，跳过"
+        fi
     else
-        echo ">>> 正在向 $DTS_FILE 添加 crypto 节点..."
-        # 在文件末尾的最后一个 '};' 之前插入（更安全）
-        sed -i '/^};$/i \
-\
-/* Crypto engine (EIP-93) */ \
-crypto: crypto@1e004000 { \
-    compatible = "airoha,an7583-eip93", "airoha,en7581-eip93", "inside-secure,safexcel-eip93ies"; \
-    reg = <0x0 0x1e004000 0x0 0x2000>; \
-    interrupts = <0 144 4>; \
-    status = "okay"; \
-};' "$DTS_FILE"
-        echo ">>> crypto 节点已添加至 $DTS_FILE"
+        # 如果完全没有，才添加引用（不重复定义）
+        echo ">>> 未找到 crypto 节点，添加引用以启用..."
+        echo "" >> "$DTS_FILE"
+        echo "&crypto {" >> "$DTS_FILE"
+        echo "    status = \"okay\";" >> "$DTS_FILE"
+        echo "};" >> "$DTS_FILE"
     fi
 done
+
+# 注意：不再创建补丁文件
+echo ">>> 设备树处理完成"
 
 # ============================================================
 # 修改 EN8811H PHY LED 配置（所有可能的 DTS 文件）
