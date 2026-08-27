@@ -284,9 +284,12 @@ jobs:
         # =========================================================
         echo ""
         echo "========== 🔍 硬件加密配置状态 =========="
-    
-        echo "--- CONFIG_KERNEL_CRYPTO_DEV_EIP93 ---"
-        grep "^CONFIG_KERNEL_CRYPTO_DEV_EIP93" .config || echo "❌"
+        echo "--- CONFIG_CRYPTO_DEV_EIP93 ---"
+        grep "^CONFIG_CRYPTO_DEV_EIP93" .config || echo "❌ 未设置"
+        echo "--- CONFIG_CRYPTO_ENGINE ---"
+        grep "^CONFIG_CRYPTO_ENGINE" .config || echo "❌ 未设置"
+        echo "--- CONFIG_CRYPTO_AES_ARM64_NEON_BLK ---"
+        grep "^CONFIG_CRYPTO_AES_ARM64_NEON_BLK" .config || echo "❌ 未设置"
         
         echo "--- target/linux/airoha/config-* ---"
         KC=$(find target/linux/airoha -maxdepth 1 -name 'config-*' | head -n1)
