@@ -69,22 +69,15 @@ CONFIG_PACKAGE_openssl-util=y
 EOF
 
 # ============================================================
-# 2. 修改设备树文件（只启用已有的 crypto 节点）
+# 2. 修改设备树文件（精确处理 crypto 节点）
 # ============================================================
 echo ">>> 正在启用设备树中的 EIP-93 加密节点..."
 
-# 查找设备特定的 DTS 文件（优先匹配 nokia 相关）
 DTS_FILES=$(find target/linux/airoha/dts/ -name "an7583-nokia*.dts" -o -name "an7583-nokia*.dtsi" 2>/dev/null)
 if [ -z "$DTS_FILES" ]; then
     DTS_FILES="target/linux/airoha/dts/an7583.dtsi"
 fi
 
-for DTS_FILE in $DTS_FILES; do
-    if [ ! -f "$DTS_FILE" ]; then
-        continue
-    fi
-    echo ">>> 检查 $DTS_FILE"
-    # 检查是否已有 crypto 节点（通过标签或节点名）
 for DTS_FILE in $DTS_FILES; do
     if [ ! -f "$DTS_FILE" ]; then
         continue
@@ -100,7 +93,6 @@ for DTS_FILE in $DTS_FILES; do
             depth=0
         }
         in_crypto {
-            # 粗略用 { } 计层，避免改到节点外的 status
             for (i=1; i<=length($0); i++) {
                 c=substr($0,i,1)
                 if (c=="{") depth++
@@ -114,7 +106,7 @@ for DTS_FILE in $DTS_FILES; do
         }
         { print }
         ' "$DTS_FILE" > "$DTS_FILE.tmp" && mv "$DTS_FILE.tmp" "$DTS_FILE"
-        echo ">>> 已处理 crypto@ 节点内的 status（仅该节点）"
+        echo ">>> 已处理 crypto@ 节点内的 status"
     fi
 
     # 2) 已有 &crypto { ... } 覆盖节点：同样只在该块内改
@@ -139,7 +131,7 @@ for DTS_FILE in $DTS_FILES; do
         }
         { print }
         ' "$DTS_FILE" > "$DTS_FILE.tmp" && mv "$DTS_FILE.tmp" "$DTS_FILE"
-        echo ">>> 已处理 &crypto 块内的 status（仅该块）"
+        echo ">>> 已处理 &crypto 块内的 status"
     fi
 
     # 3) 文件里完全没有 crypto 引用时，再追加启用
@@ -148,9 +140,7 @@ for DTS_FILE in $DTS_FILES; do
         printf '\n&crypto {\n\tstatus = "okay";\n};\n' >> "$DTS_FILE"
     fi
 done
-done
 
-# 注意：不再创建补丁文件
 echo ">>> 设备树处理完成"
 
 # ------------------------------------------------------------
