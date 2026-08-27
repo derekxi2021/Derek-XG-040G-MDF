@@ -106,45 +106,6 @@ done
 # 注意：不再创建补丁文件
 echo ">>> 设备树处理完成"
 
-# ============================================================
-# 修改 EN8811H PHY LED 配置（所有可能的 DTS 文件）
-# ============================================================
-echo ">>> 正在调整 EN8811H PHY LED 配置..."
-
-LED_INDEX=1
-# ACTIVE_LOW="active-low;"
-
-DTS_FILES=$(find target/linux/airoha/dts/ -name "*.dtsi" -o -name "*.dts" | grep -E "an7583|xg-040g-mf")
-
-for DTS_FILE in $DTS_FILES; do
-    if [ ! -f "$DTS_FILE" ]; then
-        continue
-    fi
-    echo ">>> 处理 $DTS_FILE"
-    
-    if grep -A 20 "ethernet-phy@0f" "$DTS_FILE" | grep -q "leds"; then
-        echo ">>> 找到现有 LED 配置，修改 reg 为 ${LED_INDEX}"
-        sed -i '/ethernet-phy@0f/,/};/ { s/reg = <[0-9]>/reg = <'"${LED_INDEX}"'>/ }' "$DTS_FILE"
-    else
-        echo ">>> 未找到 LED 配置，正在添加..."
-        sed -i '/ethernet-phy@0f/,/};/ {
-            /reg = <0x0f>/a\
-            \tleds {\
-            \t\t#address-cells = <1>;\
-            \t\t#size-cells = <0>;\
-            \t\tled@0 {\
-            \t\t\treg = <'"${LED_INDEX}"'>;\
-            \t\t\tcolor = <LED_COLOR_ID_GREEN>;\
-            \t\t\tfunction = LED_FUNCTION_LAN;\
-            \t\t\tlinux,default-trigger = "netdev";\
-            \t\t};\
-            \t};
-        }' "$DTS_FILE"
-    fi
-done
-
-echo ">>> PHY LED 配置已更新（索引=${LED_INDEX}）"
-
 # ------------------------------------------------------------
 # 1. 配置 CPU 频率驱动 (采用源码原生 Patch + 开启内核 Config)
 # ------------------------------------------------------------
@@ -158,37 +119,6 @@ rm -rf target/linux/airoha/files/drivers/pmdomain/mediatek/Makefile
 find target/linux/airoha/ -name "config-*" | while read -r config_file; do
     grep -q "CONFIG_AIROHA_CPU_PM_DOMAIN" "$config_file" || echo "CONFIG_AIROHA_CPU_PM_DOMAIN=y" >> "$config_file"
 done
-
-# ------------------------------------------------------------
-# 创建独立的 LAN1 LED 启动脚本
-# ------------------------------------------------------------
-echo ">>> 创建 LAN1 LED 启动脚本..."
-
-mkdir -p files/etc/init.d
-cat << 'EOF' > files/etc/init.d/led-lan1
-#!/bin/sh /etc/rc.common
-START=99
-
-start() {
-    # 等待网络接口完全就绪
-    sleep 2
-    LED_PATH="/sys/class/leds/1fb00000.system-controller:mdio-bus@c8-mii:0f:green:lan-1"
-    if [ -d "$(dirname $LED_PATH)" ]; then
-        echo netdev > "$LED_PATH"/trigger 2>/dev/null || true
-        echo lan1 > "$LED_PATH"/device_name 2>/dev/null || true
-        echo 1 > "$LED_PATH"/link 2>/dev/null || true
-        echo 1 > "$LED_PATH"/tx 2>/dev/null || true
-        echo 1 > "$LED_PATH"/rx 2>/dev/null || true
-    fi
-}
-EOF
-
-chmod +x files/etc/init.d/led-lan1
-
-# 启用该脚本（创建符号链接到 rc.d）
-mkdir -p files/etc/rc.d
-ln -sf ../init.d/led-lan1 files/etc/rc.d/S99led-lan1
-echo ">>> LAN1 LED 启动脚本已创建并启用"
 
 # ------------------------------------------------------------
 # 2. 注入 WAN MAC 地址 +1 规则 (uci-defaults 首次启动生效，支持保留配置升级)
@@ -260,19 +190,6 @@ fi
 
 uci commit network
 /etc/init.d/network restart
-
-# 等待网络接口完全启动
-sleep 2
-
-# 重新配置 LAN1 LED（确保 network restart 后绑定恢复）
-LED_PATH="/sys/class/leds/1fb00000.system-controller:mdio-bus@c8-mii:0f:green:lan-1"
-if [ -d "$(dirname $LED_PATH)" ]; then
-    echo netdev > "$LED_PATH"/trigger 2>/dev/null || true
-    echo lan1 > "$LED_PATH"/device_name 2>/dev/null || true
-    echo 1 > "$LED_PATH"/link 2>/dev/null || true
-    echo 1 > "$LED_PATH"/tx 2>/dev/null || true
-    echo 1 > "$LED_PATH"/rx 2>/dev/null || true
-fi
 
 exit 0
 EOF
