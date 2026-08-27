@@ -202,6 +202,23 @@ jobs:
         # 生成配置
         # =========================================================
         make defconfig
+        
+        # =========================================================
+        # 强制启用 EIP-93 硬件加密（解决 defconfig 忽略的问题）
+        # =========================================================
+        echo ">>> 强制启用 EIP-93 硬件加密..."
+        for opt in CONFIG_CRYPTO_ENGINE CONFIG_CRYPTO_DEV_EIP93 CONFIG_CRYPTO_AES_ARM64_NEON_BLK; do
+            sed -i "/^${opt}/d" .config
+            echo "${opt}=y" >> .config
+        done
+        # 确保 CE 选项被清理
+        for opt in CONFIG_CRYPTO_AES_ARM64_CE CONFIG_CRYPTO_AES_ARM64_CE_BLK CONFIG_CRYPTO_AES_ARM64_CE_CCM; do
+            sed -i "/^${opt}/d" .config
+            echo "# ${opt} is not set" >> .config
+        done
+        # 再次运行 defconfig 以解析依赖（但不会覆盖我们刚设置的选项）
+        make defconfig
+        echo ">>> 硬件加密配置已强制启用"  
     
         # =========================================================
         # 强制关闭 SS-Rust（defconfig 可能会重新选中）
