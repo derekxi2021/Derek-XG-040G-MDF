@@ -276,6 +276,168 @@ jobs:
         echo "========== 4. 最终确认关键 CONFIG 行 =========="
         grep -n "airoha-npu\|vlmcsd\|airoha-en7583-npu" .config || true
 
+    - name: Debug Check Custom Changes
+      run: |
+        cd openwrt
+    
+        echo "========================================"
+        echo "     Debug Check Custom Changes"
+        echo "========================================"
+        echo ""
+        
+        # ============================================================
+        # 1. 检查 .config 中的内核选项
+        # ============================================================
+        echo "--- 1. Kernel Config ---"
+        for opt in \
+          CONFIG_KERNEL_CRYPTO_DEV_EIP93 \
+          CONFIG_KERNEL_CRYPTO_DEV_EIP93_AES \
+          CONFIG_KERNEL_CRYPTO_DEV_EIP93_DES \
+          CONFIG_KERNEL_CRYPTO_AES_ARM64_NEON_BLK \
+          CONFIG_KERNEL_CRYPTO_AES_ARM64_CE \
+          CONFIG_KERNEL_CRYPTO_AES_ARM64_CE_BLK \
+          CONFIG_KERNEL_ARM64_CRYPTO_AES \
+          CONFIG_KERNEL_ARM64_CRYPTO_AES_NEON_BLK
+        do
+          if grep -q "^${opt}=y" .config; then
+            echo "  ✅ ${opt}=y"
+          elif grep -q "^${opt}=m" .config; then
+            echo "  ⚠️ ${opt}=m (module, not built-in)"
+          else
+            echo "  ❌ ${opt} NOT found"
+          fi
+        done
+        echo ""
+    
+        # ============================================================
+        # 2. 检查设备树文件中的节点
+        # ============================================================
+        echo "--- 2. Device Tree Nodes ---"
+    
+        # 检查 crypto 节点
+        DTS_FILES=$(find target/linux/airoha/dts/ -name "*.dtsi" -o -name "*.dts" 2>/dev/null | grep -E "an7583|xg-040g-mf" || true)
+        if [ -n "$DTS_FILES" ]; then
+          for dts in $DTS_FILES; do
+            if grep -q "crypto@" "$dts" 2>/dev/null; then
+              echo "  ✅ crypto node found in $dts"
+            else
+              echo "  ❌ crypto node NOT found in $dts"
+            fi
+          done
+        else
+          echo "  ⚠️ No DTS files found matching an7583/xg-040g-mf"
+        fi
+    
+        # 检查 PHY LED 节点
+        for dts in $DTS_FILES; do
+          if [ -f "$dts" ]; then
+            if grep -A 20 "ethernet-phy@0f" "$dts" 2>/dev/null | grep -q "leds"; then
+              echo "  ✅ PHY LED leds node found in $dts"
+            else
+              echo "  ❌ PHY LED leds node NOT found in $dts"
+            fi
+          fi
+        done
+        echo ""
+    
+        # ============================================================
+        # 3. 检查生成的固件中是否包含 EIP-93 模块
+        # ============================================================
+        echo "--- 3. Firmware / Modules ---"
+        if [ -d "bin/targets/airoha/an7583" ]; then
+          # 检查内核模块（如果有）
+          MODULES=$(find build_dir/target-*/linux-airoha_an7583/ -name "*eip93*" -o -name "*airoha_crypto*" 2>/dev/null | head -5)
+          if [ -n "$MODULES" ]; then
+            echo "  ✅ EIP-93 modules found:"
+            echo "$MODULES" | sed 's/^/      /'
+          else
+            echo "  ⚠️ No EIP-93 modules found in build_dir"
+          fi
+          
+          # 列出固件文件
+          echo "  📦 Firmware files:"
+          ls -lh bin/targets/airoha/an7583/*.bin 2>/dev/null | sed 's/^/      /' || echo "      (no bin files)"
+          ls -lh bin/targets/airoha/an7583/*.itb 2>/dev/null | sed 's/^/      /' || echo "      (no itb files)"
+        else
+          echo "  ⚠️ Firmware not built yet (bin/targets/airoha/an7583 not found)"
+        fi
+        echo ""
+    
+        # ============================================================
+        # 4. 检查 files/ 目录中的运行时配置（LED 启动脚本）
+        # ============================================================
+        echo "--- 4. Runtime Config (files/) ---"
+        if [ -f "files/etc/init.d/led-lan1" ]; then
+          echo "  ✅ files/etc/init.d/led-lan1 exists"
+          echo "     Content:"
+          head -10 files/etc/init.d/led-lan1 | sed 's/^/      /'
+        else
+          echo "  ❌ files/etc/init.d/led-lan1 NOT found"
+        fi
+    
+        if [ -f "files/etc/uci-defaults/99-fix-wan-mac" ]; then
+          if grep -q "LED_PATH" files/etc/uci-defaults/99-fix-wan-mac; then
+            echo "  ✅ files/etc/uci-defaults/99-fix-wan-mac contains LED config"
+          else
+            echo "  ⚠️ files/etc/uci-defaults/99-fix-wan-mac does NOT contain LED config"
+          fi
+        else
+          echo "  ❌ files/etc/uci-defaults/99-fix-wan-mac NOT found"
+        fi
+        echo ""
+    
+        # ============================================================
+        # 5. 检查 .config 中关键包的选中状态
+        # ============================================================
+        echo "--- 5. Package Selections ---"
+        for pkg in \
+          airoha-en7583-npu-firmware \
+          luci-app-airoha-npu \
+          luci-i18n-airoha-npu-zh-cn \
+          vlmcsd \
+          luci-app-vlmcsd \
+          luci-i18n-vlmcsd-zh-cn \
+          openssl-util
+        do
+          if grep -q "CONFIG_PACKAGE_${pkg}=y" .config; then
+            echo "  ✅ CONFIG_PACKAGE_${pkg}=y"
+          else
+            echo "  ❌ CONFIG_PACKAGE_${pkg} NOT enabled"
+          fi
+        done
+        echo ""
+    
+        # ============================================================
+        # 6. 检查 diy-part2.sh 是否完整执行
+        # ============================================================
+        echo "--- 6. DIY Script Execution ---"
+        # 检查脚本是否添加了 LED 启动脚本
+        if grep -q "led-lan1" "$GITHUB_WORKSPACE/$DIY_P2_SH" 2>/dev/null; then
+          echo "  ✅ diy-part2.sh contains led-lan1 setup"
+        else
+          echo "  ❌ diy-part2.sh does NOT contain led-lan1 setup"
+        fi
+    
+        # 检查是否包含 EIP-93 DTS 修改
+        if grep -q "crypto@" "$GITHUB_WORKSPACE/$DIY_P2_SH" 2>/dev/null; then
+          echo "  ✅ diy-part2.sh contains crypto DTS modification"
+        else
+          echo "  ❌ diy-part2.sh does NOT contain crypto DTS modification"
+        fi
+        echo ""
+    
+        # ============================================================
+        # 7. 总结
+        # ============================================================
+        echo "--- 7. Summary ---"
+        ERROR_COUNT=$(grep -c "❌" <<< "$(cat .config 2>/dev/null; echo "$DTS_FILES"; ls files/etc/init.d/led-lan1 2>/dev/null)" 2>/dev/null || echo "0")
+        if [ "$ERROR_COUNT" -gt 0 ]; then
+          echo "  ⚠️ Some checks failed. Please review the output above."
+        else
+          echo "  ✅ All checks passed."
+        fi
+        echo "========================================"
+
     - name: Compile the firmware
       id: compile
       run: |
