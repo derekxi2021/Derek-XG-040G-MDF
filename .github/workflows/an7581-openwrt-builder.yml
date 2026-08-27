@@ -237,14 +237,25 @@ jobs:
         # =========================================================
         # ★★★ 在 defconfig 之后，强制写入 EIP-93 配置（不执行 defconfig）★★★
         # =========================================================
-        echo ">>> 强制启用 EIP-93 硬件加密..."
-        for opt in CONFIG_CRYPTO_ENGINE CONFIG_CRYPTO_DEV_EIP93 CONFIG_CRYPTO_AES_ARM64_NEON_BLK; do
-            sed -i "/^${opt}/d" .config
-            echo "${opt}=y" >> .config
+        echo ">>> 强制启用 EIP-93（CONFIG_KERNEL_*）..."
+        for opt in \
+          CONFIG_KERNEL_CRYPTO_HW \
+          CONFIG_KERNEL_CRYPTO_ENGINE \
+          CONFIG_KERNEL_CRYPTO_DEV_EIP93 \
+          CONFIG_KERNEL_CRYPTO_DEV_EIP93_AES \
+          CONFIG_KERNEL_CRYPTO_DEV_EIP93_DES \
+          CONFIG_KERNEL_CRYPTO_AES_ARM64_NEON_BLK
+        do
+          sed -i "/^${opt}=/d;/^# ${opt} is not set/d" .config
+          echo "${opt}=y" >> .config
         done
-        for opt in CONFIG_CRYPTO_AES_ARM64_CE CONFIG_CRYPTO_AES_ARM64_CE_BLK CONFIG_CRYPTO_AES_ARM64_CE_CCM; do
-            sed -i "/^${opt}/d" .config
-            echo "# ${opt} is not set" >> .config
+        for opt in \
+          CONFIG_KERNEL_CRYPTO_AES_ARM64_CE \
+          CONFIG_KERNEL_CRYPTO_AES_ARM64_CE_BLK \
+          CONFIG_KERNEL_CRYPTO_AES_ARM64_CE_CCM
+        do
+          sed -i "/^${opt}/d" .config
+          echo "# ${opt} is not set" >> .config
         done
         echo ">>> 硬件加密配置已强制写入（不执行 defconfig，以保留修改）"
     
@@ -274,33 +285,13 @@ jobs:
         echo ""
         echo "========== 🔍 硬件加密配置状态 =========="
     
-        # 1. 检查 EIP-93 驱动
-        echo "--- CONFIG_CRYPTO_DEV_EIP93 ---"
-        grep "^CONFIG_CRYPTO_DEV_EIP93" .config || echo "❌ 未设置 (驱动未启用)"
-    
-        # 2. 检查依赖项 CONFIG_CRYPTO_ENGINE
-        echo "--- CONFIG_CRYPTO_ENGINE ---"
-        grep "^CONFIG_CRYPTO_ENGINE" .config || echo "❌ 未设置 (EIP-93 依赖缺失)"
-    
-        # 3. 检查 NEON 加速
-        echo "--- CONFIG_CRYPTO_AES_ARM64_NEON_BLK ---"
-        grep "^CONFIG_CRYPTO_AES_ARM64_NEON_BLK" .config || echo "❌ 未设置"
-    
-        # 4. 检查无效的 CE 配置是否被清理
-        echo "--- CONFIG_CRYPTO_AES_ARM64_CE 系列 (应被清理) ---"
-        grep "^CONFIG_CRYPTO_AES_ARM64_CE" .config || echo "✅ 已清理 (无 CE 配置)"
-    
-        # 5. 检查 cryptodev 用户态接口
-        echo "--- CONFIG_PACKAGE_kmod-cryptodev ---"
-        grep "^CONFIG_PACKAGE_kmod-cryptodev" .config || echo "❌ 未设置"
-    
-        # 6. 检查 openssl devcrypto 引擎
-        echo "--- CONFIG_PACKAGE_libopenssl-devcrypto ---"
-        grep "^CONFIG_PACKAGE_libopenssl-devcrypto" .config || echo "❌ 未设置"
-    
-        # 7. 检查内核配置片段（可选）
-        echo "--- 内核配置片段 (target/linux/airoha/an7581/config-6.18) ---"
-        cat target/linux/airoha/an7581/config-6.18 2>/dev/null | grep -E "EIP93|NEON_BLK|CRYPTO_ENGINE" || echo "⚠️ 片段不存在或未包含相关选项"
+        echo "--- CONFIG_KERNEL_CRYPTO_DEV_EIP93 ---"
+        grep "^CONFIG_KERNEL_CRYPTO_DEV_EIP93" .config || echo "❌"
+        
+        echo "--- target/linux/airoha/config-* ---"
+        KC=$(find target/linux/airoha -maxdepth 1 -name 'config-*' | head -n1)
+        echo "file=$KC"
+        grep -E 'EIP93|CRYPTO_ENGINE|CRYPTO_HW' "$KC" 2>/dev/null || echo "⚠️ 片段无 EIP93"
     
         echo "=========================================="
         echo ""
@@ -342,6 +333,8 @@ jobs:
         # 2. 编译
         echo -e "$(nproc) thread compile"
         make -j$(nproc) || make -j1 V=s
+        
+        grep EIP93 bin/targets/airoha/*/config.buildinfo || true
         
         # 4. 打印 Ccache 命中统计
         echo "========== Ccache Hit Rate =========="
