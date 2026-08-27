@@ -390,6 +390,23 @@ for opt in CONFIG_CRYPTO_ENGINE CONFIG_CRYPTO_DEV_EIP93 CONFIG_CRYPTO_DEV_EIP93_
     echo "${opt}=y" >> .config
 done
 
+# =========================================================
+# 修补 EIP-93 驱动设备树匹配字符串
+# =========================================================
+echo ">>> 修补 EIP-93 驱动，添加设备树兼容字符串..."
+EIP93_MAIN="drivers/crypto/inside-secure/eip93/eip93-main.c"
+if [ -f "$EIP93_MAIN" ]; then
+    # 检查是否已包含 safexcel-eip93ies，避免重复添加
+    if ! grep -q "safexcel-eip93ies" "$EIP93_MAIN"; then
+        sed -i '/{"inside-secure,eip93", 0},/a\\t{"inside-secure,safexcel-eip93ies", 0},' "$EIP93_MAIN"
+        echo ">>> 已添加 compatible 匹配项"
+    else
+        echo ">>> 已存在匹配项，跳过"
+    fi
+else
+    echo "⚠️ 找不到 eip93-main.c，跳过修补"
+fi
+
 echo "========================================="
 echo ">>> diy-part2.sh 全部执行完毕！"
 echo "========================================="
