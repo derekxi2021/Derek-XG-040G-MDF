@@ -235,23 +235,19 @@ jobs:
         done
     
         # =========================================================
-        # ★★★ 在最后强制启用 EIP-93 硬件加密（不会被后续 defconfig 覆盖）★★★
+        # ★★★ 在 defconfig 之后，强制写入 EIP-93 配置（不执行 defconfig）★★★
         # =========================================================
         echo ">>> 强制启用 EIP-93 硬件加密..."
         for opt in CONFIG_CRYPTO_ENGINE CONFIG_CRYPTO_DEV_EIP93 CONFIG_CRYPTO_AES_ARM64_NEON_BLK; do
             sed -i "/^${opt}/d" .config
             echo "${opt}=y" >> .config
         done
-        # 确保 CE 选项被清理
         for opt in CONFIG_CRYPTO_AES_ARM64_CE CONFIG_CRYPTO_AES_ARM64_CE_BLK CONFIG_CRYPTO_AES_ARM64_CE_CCM; do
             sed -i "/^${opt}/d" .config
             echo "# ${opt} is not set" >> .config
         done
-        echo ">>> 硬件加密配置已强制启用（位于最终 .config 中）"
-        
-        # ★★★ 添加这一行，确保依赖被正确解析 ★★★
-        make defconfig
-        
+        echo ">>> 硬件加密配置已强制写入（不执行 defconfig，以保留修改）"
+    
         # =========================================================
         # 诊断输出
         # =========================================================
