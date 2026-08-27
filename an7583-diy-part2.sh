@@ -85,22 +85,69 @@ for DTS_FILE in $DTS_FILES; do
     fi
     echo ">>> 检查 $DTS_FILE"
     # 检查是否已有 crypto 节点（通过标签或节点名）
-    if grep -q "crypto@" "$DTS_FILE" || grep -q "&crypto" "$DTS_FILE"; then
-        # 如果存在，确保其 status 为 "okay"
-        if grep -q "status = \"disabled\"" "$DTS_FILE"; then
-            sed -i 's/status = "disabled";/status = "okay";/g' "$DTS_FILE"
-            echo ">>> 已启用 crypto 节点（将 status 改为 okay）"
-        else
-            echo ">>> crypto 节点已存在且未被禁用，跳过"
-        fi
-    else
-        # 如果完全没有，才添加引用（不重复定义）
-        echo ">>> 未找到 crypto 节点，添加引用以启用..."
-        echo "" >> "$DTS_FILE"
-        echo "&crypto {" >> "$DTS_FILE"
-        echo "    status = \"okay\";" >> "$DTS_FILE"
-        echo "};" >> "$DTS_FILE"
+for DTS_FILE in $DTS_FILES; do
+    if [ ! -f "$DTS_FILE" ]; then
+        continue
     fi
+    echo ">>> 检查 $DTS_FILE"
+
+    # 1) 已有 crypto@... { ... } 节点：只在该节点内把 disabled → okay
+    if grep -qE 'crypto@[0-9a-fA-F]+' "$DTS_FILE"; then
+        awk '
+        BEGIN { in_crypto=0; depth=0 }
+        /crypto@[0-9a-fA-F]+/ {
+            in_crypto=1
+            depth=0
+        }
+        in_crypto {
+            # 粗略用 { } 计层，避免改到节点外的 status
+            for (i=1; i<=length($0); i++) {
+                c=substr($0,i,1)
+                if (c=="{") depth++
+                if (c=="}") depth--
+            }
+            if ($0 ~ /status[[:space:]]*=[[:space:]]*"disabled"/)
+                sub(/status[[:space:]]*=[[:space:]]*"disabled"/, "status = \"okay\"")
+            print
+            if (in_crypto && depth<=0 && /}/) in_crypto=0
+            next
+        }
+        { print }
+        ' "$DTS_FILE" > "$DTS_FILE.tmp" && mv "$DTS_FILE.tmp" "$DTS_FILE"
+        echo ">>> 已处理 crypto@ 节点内的 status（仅该节点）"
+    fi
+
+    # 2) 已有 &crypto { ... } 覆盖节点：同样只在该块内改
+    if grep -q '&crypto' "$DTS_FILE"; then
+        awk '
+        BEGIN { in_crypto=0; depth=0 }
+        /&crypto/ {
+            in_crypto=1
+            depth=0
+        }
+        in_crypto {
+            for (i=1; i<=length($0); i++) {
+                c=substr($0,i,1)
+                if (c=="{") depth++
+                if (c=="}") depth--
+            }
+            if ($0 ~ /status[[:space:]]*=[[:space:]]*"disabled"/)
+                sub(/status[[:space:]]*=[[:space:]]*"disabled"/, "status = \"okay\"")
+            print
+            if (in_crypto && depth<=0 && /}/) in_crypto=0
+            next
+        }
+        { print }
+        ' "$DTS_FILE" > "$DTS_FILE.tmp" && mv "$DTS_FILE.tmp" "$DTS_FILE"
+        echo ">>> 已处理 &crypto 块内的 status（仅该块）"
+    fi
+
+    # 3) 文件里完全没有 crypto 引用时，再追加启用
+    if ! grep -qE 'crypto@[0-9a-fA-F]+|&crypto' "$DTS_FILE"; then
+        echo ">>> 未找到 crypto 节点，追加 &crypto { status = okay }"
+        printf '\n&crypto {\n\tstatus = "okay";\n};\n' >> "$DTS_FILE"
+    fi
+done
 done
 
 # 注意：不再创建补丁文件
@@ -209,7 +256,7 @@ echo "CONFIG_PACKAGE_airoha-an7583-npu-firmware=y" >> .config
 
 TARGET_RPC=$(find package/luci-app-airoha-npu -type f -name 'luci.airoha_npu' | head -n1)
 if [ -f "$TARGET_RPC" ]; then
-  python3 - "$TARGET_RPC" << 'PY'
+  python3 - "$TARGET_RPC" << 'PY' || echo "⚠️ NPU 补丁未匹配，继续编译"
 import sys
 path = sys.argv[1]
 text = open(path, encoding="utf-8", errors="ignore").read()
