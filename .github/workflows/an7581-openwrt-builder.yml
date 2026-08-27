@@ -320,7 +320,21 @@ jobs:
       id: compile
       run: |
         cd openwrt
-
+        
+        # 1. 在编译内核前修补 EIP-93 驱动设备树匹配
+        echo ">>> 修补 EIP-93 驱动设备树匹配..."
+        EIP93_MAIN=$(find build_dir -path "*/linux-*/drivers/crypto/inside-secure/eip93/eip93-main.c" 2>/dev/null | head -1)
+        if [ -n "$EIP93_MAIN" ] && [ -f "$EIP93_MAIN" ]; then
+          if ! grep -q "safexcel-eip93ies" "$EIP93_MAIN"; then
+            sed -i '/{"inside-secure,eip93", 0},/a\\t{"inside-secure,safexcel-eip93ies", 0},' "$EIP93_MAIN"
+            echo ">>> 已添加 compatible 匹配项到 $EIP93_MAIN"
+          else
+            echo ">>> 已存在匹配项，跳过"
+          fi
+        else
+          echo "⚠️ 未找到 eip93-main.c，驱动可能已内置或路径不同"
+        fi
+        
         # 1. Ccache
         export CCACHE_DIR=/home/runner/.ccache
         export CCACHE_BASEDIR=/workdir/openwrt
