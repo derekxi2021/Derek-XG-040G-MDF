@@ -160,31 +160,25 @@ jobs:
         echo "CONFIG_CCACHE=y" >> .config
     
         # =========================================================
-        # Go 配置：使用 OpenWrt 内部 Go（不依赖外部）
+        # Go 配置：使用 OpenWrt 内部 Go
         # =========================================================
         echo ">>> 配置使用 OpenWrt 内部 Go..."
-    
-        # 确保不使用外部 Go
         sed -i '/CONFIG_USE_EXTERNAL_HOST_GOLANG/d' .config
         echo "# CONFIG_USE_EXTERNAL_HOST_GOLANG is not set" >> .config
-    
-        # 确保不设置外部 Go 路径
         sed -i '/CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT/d' .config
         echo "# CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT is not set" >> .config
-    
-        # 启用内部 Go 编译（bootstrap）
         sed -i '/CONFIG_GOLANG_BUILD_BOOTSTRAP/d' .config
         echo "CONFIG_GOLANG_BUILD_BOOTSTRAP=y" >> .config
     
         # =========================================================
-        # Rust 配置：禁用外部 Rust，禁用 SS-Rust
+        # Rust 配置：禁用外部 Rust
         # =========================================================
         echo ">>> 禁用 Rust 相关..."
         sed -i '/CONFIG_USE_EXTERNAL_HOST_RUST/d' .config
         echo "# CONFIG_USE_EXTERNAL_HOST_RUST is not set" >> .config
     
         # =========================================================
-        # 强制选中需要的包
+        # 强制选中需要的包（如果 diy-part2.sh 未生效）
         # =========================================================
         for pkg in \
           airoha-en7583-npu-firmware \
@@ -192,35 +186,37 @@ jobs:
           luci-i18n-airoha-npu-zh-cn \
           vlmcsd \
           luci-app-vlmcsd \
-          luci-i18n-vlmcsd-zh-cn
+          luci-i18n-vlmcsd-zh-cn \
+          openssl-util
         do
           sed -i "s/# CONFIG_PACKAGE_${pkg} is not set/CONFIG_PACKAGE_${pkg}=y/" .config 2>/dev/null || true
           grep -q "CONFIG_PACKAGE_${pkg}=y" .config || echo "CONFIG_PACKAGE_${pkg}=y" >> .config
         done
     
         # =========================================================
-        # 生成配置
+        # 生成基础配置（但不清除自定义）
         # =========================================================
         make defconfig
     
         # =========================================================
-        # 强制关闭 SS-Rust（defconfig 可能会重新选中）
+        # ★★★ 关键：在 defconfig 之后，再次追加硬件加密内核选项 ★★★
         # =========================================================
-        for opt in \
-          luci-app-passwall2_INCLUDE_Shadowsocks_Rust_Client \
-          luci-app-passwall2_INCLUDE_Shadowsocks_Rust_Server \
-          shadowsocks-rust-sslocal \
-          shadowsocks-rust-ssserver \
-          shadowsocks-rust-ssmanager \
-          shadowsocks-rust-ssurl \
-          shadowsocks-rust-ssservice
-        do
-          sed -i "/CONFIG_PACKAGE_${opt}/d" .config
-          echo "# CONFIG_PACKAGE_${opt} is not set" >> .config
-        done
-    
-        # 再次 defconfig 确认
-        make defconfig
+        echo ">>> 追加 EIP-93 和 ARMv8 AES 内核配置..."
+cat << 'EOF' >> .config
+CONFIG_KERNEL_CRYPTO_HW=y
+CONFIG_KERNEL_CRYPTO_DEV_EIP93=y
+CONFIG_KERNEL_CRYPTO_DEV_EIP93_AES=y
+CONFIG_KERNEL_CRYPTO_DEV_EIP93_DES=y
+CONFIG_KERNEL_CRYPTO_AES_ARM64_NEON_BLK=y
+CONFIG_KERNEL_CRYPTO_AES_ARM64_CE=y
+CONFIG_KERNEL_CRYPTO_AES_ARM64_CE_BLK=y
+CONFIG_KERNEL_ARM64_CRYPTO_AES=y
+CONFIG_KERNEL_ARM64_CRYPTO_AES_NEON_BLK=y
+EOF
+      
+        # 消除重复并执行 oldconfig（不是 defconfig）
+        sort -u -o .config .config
+        yes "" | make oldconfig
     
         # 再次关闭可能被重新选中的 SS-Rust
         for opt in \
@@ -236,14 +232,9 @@ jobs:
           echo "# CONFIG_PACKAGE_${opt} is not set" >> .config
         done
     
-        # =========================================================
         # 诊断输出
-        # =========================================================
-        echo "========== Go 配置确认 =========="
-        grep -E 'GOLANG_EXTERNAL_BOOTSTRAP|GOLANG_BUILD_BOOTSTRAP|USE_EXTERNAL_HOST_GOLANG' .config || true
-    
-        echo "========== Rust / SS-Rust 诊断 =========="
-        grep -E 'Shadowsocks_Rust|shadowsocks-rust|EXTERNAL_HOST_RUST|PACKAGE_rust' .config || true
+        echo "========== 关键内核配置检查 =========="
+        grep -E "CONFIG_KERNEL_CRYPTO_DEV_EIP93|CONFIG_KERNEL_CRYPTO_AES_ARM64_NEON_BLK" .config || true
     
         # =========================================================
         # 下载源码
@@ -251,30 +242,6 @@ jobs:
         make download -j8
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
-        
-    - name: Debug Check Custom Changes
-      run: |
-        cd openwrt
-    
-        echo "========== 1. .config 关键包是否选中 =========="
-        grep -E "CONFIG_PACKAGE_(airoha-en7583-npu-firmware|luci-app-airoha-npu|luci-i18n-airoha-npu|vlmcsd|luci-app-vlmcsd)=y" .config || echo "⚠️ 以上包有缺失"
-    
-        echo ""
-        echo "========== 2. package/ 目录是否有 luci-app-airoha-npu =========="
-        if [ -d "package/luci-app-airoha-npu" ]; then
-          echo "✔ package/luci-app-airoha-npu 存在"
-          ls package/luci-app-airoha-npu/
-        else
-          echo "❌ package/luci-app-airoha-npu 不存在！clone 失败"
-        fi
-    
-        echo ""
-        echo "========== 3. feeds 里是否有 vlmcsd =========="
-        find feeds -type d -name "*vlmcsd*" 2>/dev/null || echo "❌ feeds 里找不到 vlmcsd"
-    
-        echo ""
-        echo "========== 4. 最终确认关键 CONFIG 行 =========="
-        grep -n "airoha-npu\|vlmcsd\|airoha-en7583-npu" .config || true
 
     - name: Debug Check Custom Changes
       run: |
@@ -339,7 +306,14 @@ jobs:
           fi
         done
         echo ""
-    
+        
+        # 检查补丁文件
+        if [ -f "target/linux/airoha/patches-6.18/999-add-eip93-crypto-node.patch" ]; then
+          echo "  ✅ Kernel patch 999-add-eip93-crypto-node.patch exists"
+        else
+          echo "  ❌ Kernel patch NOT found"
+        fi
+        
         # ============================================================
         # 3. 检查生成的固件中是否包含 EIP-93 模块
         # ============================================================
