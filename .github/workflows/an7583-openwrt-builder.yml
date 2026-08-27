@@ -156,12 +156,8 @@ jobs:
       run: |
         cd openwrt
     
-        # 启用 ccache
         echo "CONFIG_CCACHE=y" >> .config
     
-        # =========================================================
-        # Go 配置：使用 OpenWrt 内部 Go
-        # =========================================================
         echo ">>> 配置使用 OpenWrt 内部 Go..."
         sed -i '/CONFIG_USE_EXTERNAL_HOST_GOLANG/d' .config
         echo "# CONFIG_USE_EXTERNAL_HOST_GOLANG is not set" >> .config
@@ -170,16 +166,11 @@ jobs:
         sed -i '/CONFIG_GOLANG_BUILD_BOOTSTRAP/d' .config
         echo "CONFIG_GOLANG_BUILD_BOOTSTRAP=y" >> .config
     
-        # =========================================================
-        # Rust 配置：禁用外部 Rust
-        # =========================================================
         echo ">>> 禁用 Rust 相关..."
         sed -i '/CONFIG_USE_EXTERNAL_HOST_RUST/d' .config
         echo "# CONFIG_USE_EXTERNAL_HOST_RUST is not set" >> .config
     
-        # =========================================================
-        # 强制选中需要的包（如果 diy-part2.sh 未生效）
-        # =========================================================
+        # 强制选中需要的包
         for pkg in \
           airoha-en7583-npu-firmware \
           luci-app-airoha-npu \
@@ -193,15 +184,10 @@ jobs:
           grep -q "CONFIG_PACKAGE_${pkg}=y" .config || echo "CONFIG_PACKAGE_${pkg}=y" >> .config
         done
     
-        # =========================================================
-        # 生成基础配置（但不清除自定义）
-        # =========================================================
         make defconfig
     
-        # =========================================================
-        # ★★★ 关键：在 defconfig 之后，再次追加硬件加密内核选项 ★★★
-        # =========================================================
-        echo ">>> 追加 EIP-93 和 ARMv8 AES 内核配置...
+        echo ">>> 追加 EIP-93 和 ARMv8 AES 内核配置..."
+        # 使用 echo 逐行追加，避免 heredoc 缩进问题
         echo "CONFIG_KERNEL_CRYPTO_HW=y" >> .config
         echo "CONFIG_KERNEL_CRYPTO_DEV_EIP93=y" >> .config
         echo "CONFIG_KERNEL_CRYPTO_DEV_EIP93_AES=y" >> .config
@@ -211,8 +197,7 @@ jobs:
         echo "CONFIG_KERNEL_CRYPTO_AES_ARM64_CE_BLK=y" >> .config
         echo "CONFIG_KERNEL_ARM64_CRYPTO_AES=y" >> .config
         echo "CONFIG_KERNEL_ARM64_CRYPTO_AES_NEON_BLK=y" >> .config
-      
-        # 消除重复并执行 oldconfig（不是 defconfig）
+    
         sort -u -o .config .config
         yes "" | make oldconfig
     
@@ -230,13 +215,9 @@ jobs:
           echo "# CONFIG_PACKAGE_${opt} is not set" >> .config
         done
     
-        # 诊断输出
         echo "========== 关键内核配置检查 =========="
         grep -E "CONFIG_KERNEL_CRYPTO_DEV_EIP93|CONFIG_KERNEL_CRYPTO_AES_ARM64_NEON_BLK" .config || true
     
-        # =========================================================
-        # 下载源码
-        # =========================================================
         make download -j8
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
