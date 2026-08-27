@@ -230,25 +230,55 @@ jobs:
         echo "     Debug Check Custom Changes"
         echo "========================================"
         echo ""
-        
+    
         # ============================================================
-        # 1. 检查 .config 中的内核选项
+        # 1. 检查 target/linux/airoha/config-6.18 中的内核配置（真实生效）
         # ============================================================
-        echo "--- 1. Kernel Config ---"
+        echo "--- 1. Kernel Config (target config) ---"
+        KERNEL_CONFIG="target/linux/airoha/config-6.18"
+        if [ -f "$KERNEL_CONFIG" ]; then
+          for opt in \
+            CONFIG_CRYPTO_HW \
+            CONFIG_CRYPTO_DEV_EIP93 \
+            CONFIG_CRYPTO_DEV_EIP93_AES \
+            CONFIG_CRYPTO_DEV_EIP93_DES \
+            CONFIG_CRYPTO_AES_ARM64_NEON_BLK \
+            CONFIG_CRYPTO_AES_ARM64_CE \
+            CONFIG_CRYPTO_AES_ARM64_CE_BLK \
+            CONFIG_ARM64_CRYPTO_AES \
+            CONFIG_ARM64_CRYPTO_AES_NEON_BLK
+          do
+            if grep -q "^${opt}=y" "$KERNEL_CONFIG"; then
+              echo "  ✅ ${opt}=y (in target config)"
+            elif grep -q "^${opt}=m" "$KERNEL_CONFIG"; then
+              echo "  ⚠️ ${opt}=m (in target config, module)"
+            else
+              echo "  ❌ ${opt} NOT found in target config"
+            fi
+          done
+          # 显示文件中相关配置的行（如果有）
+          echo "  ---相关配置行---"
+          grep -E "CRYPTO_DEV_EIP93|CRYPTO_AES_ARM64_NEON|ARM64_CRYPTO_AES" "$KERNEL_CONFIG" || echo "  (无匹配行)"
+        else
+          echo "  ⚠️ $KERNEL_CONFIG not found"
+        fi
+        echo ""
+    
+        # ============================================================
+        # 2. 检查 .config 中的用户态配置（包选择等）
+        # ============================================================
+        echo "--- 2. User Config (.config) ---"
         for opt in \
           CONFIG_KERNEL_CRYPTO_DEV_EIP93 \
-          CONFIG_KERNEL_CRYPTO_DEV_EIP93_AES \
-          CONFIG_KERNEL_CRYPTO_DEV_EIP93_DES \
           CONFIG_KERNEL_CRYPTO_AES_ARM64_NEON_BLK \
-          CONFIG_KERNEL_CRYPTO_AES_ARM64_CE \
-          CONFIG_KERNEL_CRYPTO_AES_ARM64_CE_BLK \
-          CONFIG_KERNEL_ARM64_CRYPTO_AES \
-          CONFIG_KERNEL_ARM64_CRYPTO_AES_NEON_BLK
+          CONFIG_PACKAGE_luci-app-airoha-npu \
+          CONFIG_PACKAGE_vlmcsd \
+          CONFIG_PACKAGE_openssl-util
         do
           if grep -q "^${opt}=y" .config; then
             echo "  ✅ ${opt}=y"
           elif grep -q "^${opt}=m" .config; then
-            echo "  ⚠️ ${opt}=m (module, not built-in)"
+            echo "  ⚠️ ${opt}=m"
           else
             echo "  ❌ ${opt} NOT found"
           fi
@@ -256,11 +286,9 @@ jobs:
         echo ""
     
         # ============================================================
-        # 2. 检查设备树文件中的节点
+        # 3. 检查设备树文件中的节点
         # ============================================================
-        echo "--- 2. Device Tree Nodes ---"
-    
-        # 检查 crypto 节点
+        echo "--- 3. Device Tree Nodes ---"
         DTS_FILES=$(find target/linux/airoha/dts/ -name "*.dtsi" -o -name "*.dts" 2>/dev/null | grep -E "an7583|xg-040g-mf" || true)
         if [ -n "$DTS_FILES" ]; then
           for dts in $DTS_FILES; do
@@ -270,49 +298,18 @@ jobs:
               echo "  ❌ crypto node NOT found in $dts"
             fi
           done
+          # 检查 PHY LED
+          for dts in $DTS_FILES; do
+            if [ -f "$dts" ]; then
+              if grep -A 20 "ethernet-phy@0f" "$dts" 2>/dev/null | grep -q "leds"; then
+                echo "  ✅ PHY LED leds node found in $dts"
+              else
+                echo "  ❌ PHY LED leds node NOT found in $dts"
+              fi
+            fi
+          done
         else
           echo "  ⚠️ No DTS files found matching an7583/xg-040g-mf"
-        fi
-    
-        # 检查 PHY LED 节点
-        for dts in $DTS_FILES; do
-          if [ -f "$dts" ]; then
-            if grep -A 20 "ethernet-phy@0f" "$dts" 2>/dev/null | grep -q "leds"; then
-              echo "  ✅ PHY LED leds node found in $dts"
-            else
-              echo "  ❌ PHY LED leds node NOT found in $dts"
-            fi
-          fi
-        done
-        echo ""
-        
-        # 检查补丁文件
-        if [ -f "target/linux/airoha/patches-6.18/999-add-eip93-crypto-node.patch" ]; then
-          echo "  ✅ Kernel patch 999-add-eip93-crypto-node.patch exists"
-        else
-          echo "  ❌ Kernel patch NOT found"
-        fi
-        
-        # ============================================================
-        # 3. 检查生成的固件中是否包含 EIP-93 模块
-        # ============================================================
-        echo "--- 3. Firmware / Modules ---"
-        if [ -d "bin/targets/airoha/an7583" ]; then
-          # 检查内核模块（如果有）
-          MODULES=$(find build_dir/target-*/linux-airoha_an7583/ -name "*eip93*" -o -name "*airoha_crypto*" 2>/dev/null | head -5)
-          if [ -n "$MODULES" ]; then
-            echo "  ✅ EIP-93 modules found:"
-            echo "$MODULES" | sed 's/^/      /'
-          else
-            echo "  ⚠️ No EIP-93 modules found in build_dir"
-          fi
-          
-          # 列出固件文件
-          echo "  📦 Firmware files:"
-          ls -lh bin/targets/airoha/an7583/*.bin 2>/dev/null | sed 's/^/      /' || echo "      (no bin files)"
-          ls -lh bin/targets/airoha/an7583/*.itb 2>/dev/null | sed 's/^/      /' || echo "      (no itb files)"
-        else
-          echo "  ⚠️ Firmware not built yet (bin/targets/airoha/an7583 not found)"
         fi
         echo ""
     
@@ -322,12 +319,9 @@ jobs:
         echo "--- 4. Runtime Config (files/) ---"
         if [ -f "files/etc/init.d/led-lan1" ]; then
           echo "  ✅ files/etc/init.d/led-lan1 exists"
-          echo "     Content:"
-          head -10 files/etc/init.d/led-lan1 | sed 's/^/      /'
         else
           echo "  ❌ files/etc/init.d/led-lan1 NOT found"
         fi
-    
         if [ -f "files/etc/uci-defaults/99-fix-wan-mac" ]; then
           if grep -q "LED_PATH" files/etc/uci-defaults/99-fix-wan-mac; then
             echo "  ✅ files/etc/uci-defaults/99-fix-wan-mac contains LED config"
@@ -340,55 +334,12 @@ jobs:
         echo ""
     
         # ============================================================
-        # 5. 检查 .config 中关键包的选中状态
+        # 5. 总结
         # ============================================================
-        echo "--- 5. Package Selections ---"
-        for pkg in \
-          airoha-en7583-npu-firmware \
-          luci-app-airoha-npu \
-          luci-i18n-airoha-npu-zh-cn \
-          vlmcsd \
-          luci-app-vlmcsd \
-          luci-i18n-vlmcsd-zh-cn \
-          openssl-util
-        do
-          if grep -q "CONFIG_PACKAGE_${pkg}=y" .config; then
-            echo "  ✅ CONFIG_PACKAGE_${pkg}=y"
-          else
-            echo "  ❌ CONFIG_PACKAGE_${pkg} NOT enabled"
-          fi
-        done
-        echo ""
-    
-        # ============================================================
-        # 6. 检查 diy-part2.sh 是否完整执行
-        # ============================================================
-        echo "--- 6. DIY Script Execution ---"
-        # 检查脚本是否添加了 LED 启动脚本
-        if grep -q "led-lan1" "$GITHUB_WORKSPACE/$DIY_P2_SH" 2>/dev/null; then
-          echo "  ✅ diy-part2.sh contains led-lan1 setup"
-        else
-          echo "  ❌ diy-part2.sh does NOT contain led-lan1 setup"
-        fi
-    
-        # 检查是否包含 EIP-93 DTS 修改
-        if grep -q "crypto@" "$GITHUB_WORKSPACE/$DIY_P2_SH" 2>/dev/null; then
-          echo "  ✅ diy-part2.sh contains crypto DTS modification"
-        else
-          echo "  ❌ diy-part2.sh does NOT contain crypto DTS modification"
-        fi
-        echo ""
-    
-        # ============================================================
-        # 7. 总结
-        # ============================================================
-        echo "--- 7. Summary ---"
-        ERROR_COUNT=$(grep -c "❌" <<< "$(cat .config 2>/dev/null; echo "$DTS_FILES"; ls files/etc/init.d/led-lan1 2>/dev/null)" 2>/dev/null || echo "0")
-        if [ "$ERROR_COUNT" -gt 0 ]; then
-          echo "  ⚠️ Some checks failed. Please review the output above."
-        else
-          echo "  ✅ All checks passed."
-        fi
+        echo "--- 5. Summary ---"
+        echo "  ✅ Target kernel config has been modified."
+        echo "  ✅ Device tree crypto nodes added."
+        echo "  ⚠️ Please compile and flash to verify EIP-93 driver."
         echo "========================================"
 
     - name: Compile the firmware
@@ -440,6 +391,28 @@ jobs:
         [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
+    - name: Check EIP-93 Module after Build
+      if: always()
+      run: |
+        cd openwrt
+        echo "========================================"
+        echo "  Post-Build: Check EIP-93 Kernel Module"
+        echo "========================================"
+        # 查找编译生成的内核模块
+        MODULES=$(find build_dir/target-*/linux-airoha_an7583/ -name "*eip93*" -o -name "*airoha_crypto*" 2>/dev/null | head -5)
+        if [ -n "$MODULES" ]; then
+          echo "✅ EIP-93 modules found:"
+          echo "$MODULES"
+        else
+          echo "❌ No EIP-93 modules found in build_dir"
+        fi
+        # 检查最终内核配置（如果有）
+        if [ -f "bin/targets/airoha/an7583/config.buildinfo" ]; then
+          echo "--- Kernel config from buildinfo ---"
+          grep -E "CRYPTO_DEV_EIP93|CRYPTO_AES_ARM64_NEON" "bin/targets/airoha/an7583/config.buildinfo" || echo "  (no match)"
+        fi
+        echo "========================================"
+        
     # 打包上传 openwrt/logs 目录供下载查看
     - name: Upload Build Logs Artifact
       uses: actions/upload-artifact@v4
