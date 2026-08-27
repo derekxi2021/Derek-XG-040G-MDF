@@ -33,41 +33,38 @@ CONFIG_PACKAGE_openssl-util=y
 EOF
 
 # ============================================================
-# 2. 修改设备树文件（使用更可靠的追加方式）
+# 2. 修改设备树文件（针对所有设备特定的 DTS）
 # ============================================================
 echo ">>> 正在为设备树添加 EIP-93 加密节点..."
 
-# 查找设备特定的 DTS 文件（优先）
-DTS_FILE="target/linux/airoha/dts/an7583-nokia-xg-040g-mf.dts"
-if [ ! -f "$DTS_FILE" ]; then
-    # 如果设备特定文件不存在，尝试通用文件
-    DTS_FILE="target/linux/airoha/dts/an7583.dtsi"
+# 查找所有设备特定的 DTS 文件（优先匹配 nokia 相关）
+DTS_FILES=$(find target/linux/airoha/dts/ -name "an7583-nokia*.dts" -o -name "an7583-nokia*.dtsi" 2>/dev/null)
+if [ -z "$DTS_FILES" ]; then
+    DTS_FILES="target/linux/airoha/dts/an7583.dtsi"
 fi
 
-if [ -f "$DTS_FILE" ]; then
+for DTS_FILE in $DTS_FILES; do
+    if [ ! -f "$DTS_FILE" ]; then
+        continue
+    fi
+    echo ">>> 检查 $DTS_FILE"
     if grep -q "crypto@" "$DTS_FILE"; then
         echo ">>> 设备树中已存在 crypto 节点，跳过添加"
     else
         echo ">>> 正在向 $DTS_FILE 添加 crypto 节点..."
-        # 使用 tee -a 追加到文件末尾（确保一定添加）
-        cat >> "$DTS_FILE" << 'DTS_EOF'
-
-/* Crypto engine (EIP-93) */
-crypto: crypto@1e004000 {
-    compatible = "airoha,an7583-eip93", "airoha,en7581-eip93", "inside-secure,safexcel-eip93ies";
-    reg = <0x0 0x1e004000 0x0 0x2000>;
-    interrupts = <0 144 4>;
-    status = "okay";
-};
-DTS_EOF
-        echo ">>> crypto 节点已追加到 $DTS_FILE"
-        # 输出最后几行以确认
-        echo ">>> 文件末尾内容："
-        tail -5 "$DTS_FILE"
+        # 在文件末尾的最后一个 '};' 之前插入（更安全）
+        sed -i '/^};$/i \
+\
+/* Crypto engine (EIP-93) */ \
+crypto: crypto@1e004000 { \
+    compatible = "airoha,an7583-eip93", "airoha,en7581-eip93", "inside-secure,safexcel-eip93ies"; \
+    reg = <0x0 0x1e004000 0x0 0x2000>; \
+    interrupts = <0 144 4>; \
+    status = "okay"; \
+};' "$DTS_FILE"
+        echo ">>> crypto 节点已添加至 $DTS_FILE"
     fi
-else
-    echo "⚠️ 未找到 DTS 文件，跳过设备树修改"
-fi
+done
 
 # ============================================================
 # 修改 EN8811H PHY LED 配置（所有可能的 DTS 文件）
@@ -471,14 +468,11 @@ if ! grep -q "CONFIG_KERNEL_CRYPTO_DEV_EIP93=y" .config; then
     echo "CONFIG_KERNEL_CRYPTO_DEV_EIP93=y" >> .config
 fi
 
-# 执行 oldconfig 自动接受默认
-yes "" | make oldconfig
-
-# 再次验证
+# 检查 EIP-93 配置是否存在（但不要执行 oldconfig）
 if grep -q "CONFIG_KERNEL_CRYPTO_DEV_EIP93=y" .config; then
-    echo ">>> ✅ EIP-93 配置已成功启用"
+    echo ">>> ✅ EIP-93 配置已存在"
 else
-    echo ">>> ❌ EIP-93 配置仍然未启用，可能依赖缺失"
+    echo ">>> ⚠️ EIP-93 配置未找到，将在 Download package 步骤中追加"
 fi
 
 echo "========================================="
