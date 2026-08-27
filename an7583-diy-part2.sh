@@ -9,6 +9,40 @@ echo ">>> 开始执行 diy-part2.sh 完整自定义脚本"
 echo "========================================="
 
 # ============================================================
+# 直接修改内核配置文件（target 级别，不会被 defconfig 重置）
+# ============================================================
+echo ">>> 正在修改内核配置文件（target/linux/airoha/config-6.18）..."
+
+KERNEL_CONFIG="target/linux/airoha/config-6.18"
+if [ -f "$KERNEL_CONFIG" ]; then
+    # 检查并添加 EIP-93 相关配置
+    for opt in \
+      "CONFIG_CRYPTO_HW=y" \
+      "CONFIG_CRYPTO_DEV_EIP93=y" \
+      "CONFIG_CRYPTO_DEV_EIP93_AES=y" \
+      "CONFIG_CRYPTO_DEV_EIP93_DES=y" \
+      "CONFIG_CRYPTO_AES_ARM64_NEON_BLK=y" \
+      "CONFIG_CRYPTO_AES_ARM64_CE=y" \
+      "CONFIG_CRYPTO_AES_ARM64_CE_BLK=y" \
+      "CONFIG_ARM64_CRYPTO_AES=y" \
+      "CONFIG_ARM64_CRYPTO_AES_NEON_BLK=y"
+    do
+        opt_name="${opt%=*}"
+        if ! grep -q "^${opt_name}=" "$KERNEL_CONFIG"; then
+            echo "$opt" >> "$KERNEL_CONFIG"
+            echo ">>> 已添加 $opt"
+        else
+            echo ">>> $opt 已存在"
+        fi
+    done
+    echo ">>> 内核配置文件修改完成"
+    echo ">>> 当前 $KERNEL_CONFIG 中的 EIP-93 相关配置："
+    grep -E "CRYPTO_DEV_EIP93|CRYPTO_AES_ARM64_NEON" "$KERNEL_CONFIG" || true
+else
+    echo "⚠️ 未找到 $KERNEL_CONFIG，跳过"
+fi
+
+# ============================================================
 # 1. 提前强制设置内核配置（在 defconfig 之前）
 # ============================================================
 echo ">>> 提前设置内核配置..."
