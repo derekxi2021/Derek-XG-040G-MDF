@@ -372,7 +372,7 @@ fi
 echo ">>> 应用 Airoha AN7583 PPPoE 修复补丁..."
 
 # 进入 OpenWrt 源码目录
-cd openwrt
+#cd openwrt
 
 # 使用 wget 依次下载并应用三个补丁
 # 补丁 1: cadfaa6840 - 处理缺失的中断
