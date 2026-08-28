@@ -112,9 +112,6 @@ rm -rf package/luci-app-airoha-npu
 git clone --depth=1 https://github.com/rchen14b/luci-app-airoha-npu.git package/luci-app-airoha-npu
 sed -i 's|include ../../luci.mk|include $(TOPDIR)/feeds/luci/luci.mk|' package/luci-app-airoha-npu/Makefile
 
-# 强制开启配置选中
-echo "CONFIG_PACKAGE_luci-app-airoha-npu=y" >> .config
-
 # ------------------------------------------------------------
 # 修补 rpcd 后端脚本：彻底替换 NPU 版本提取逻辑（从 dmesg 直接提取）
 # ------------------------------------------------------------
@@ -230,7 +227,11 @@ git clone --depth=1 https://github.com/gSpotx2f/luci-app-temp-status.git package
 
 # 3. 注入 MTK/Airoha CPU 温度节点修复补丁 (防止概览卡片漏显温度)
 echo ">>> [DIY-P2] 正在修补 LuCI 概览页 CPU 温度读取节点..."
-find package/ -type f \( -name "luci" -o -name "10_system.js" \) -exec sed -i 's|/sys/class/hwmon/hwmon.*/temp1_input|/sys/class/thermal/thermal_zone0/temp|g' {} + 2>/dev/null || true
+find package/luci-base package/luci-mod-status package/luci-app-cpu-status package/luci-app-temp-status \
+    -type f \( -name "*.js" -o -name "*.lua" \) \
+    -exec sed -i \
+    's|/sys/class/hwmon/hwmon.*/temp1_input|/sys/class/thermal/thermal_zone0/temp|g' {} + \
+    2>/dev/null || true
 
 # ============================================================
 # [DIY-P2] 4. 重建索引树并安全注入配置
@@ -248,61 +249,6 @@ CONFIG_PACKAGE_luci-i18n-temp-status-zh-cn=y
 EOF
 
 echo ">>> [DIY-P2] 修复完成！CPU/Temp 插件与温度节点映射均已配置完毕。"
-
-# =========================================================
-# 硬件加密：EIP-93（直接写入 CONFIG_*）
-# =========================================================
-echo ">>> 配置 EIP-93 硬件加密..."
-
-# 1) 尝试写入 target/linux/airoha/config-*（如果存在）
-KERNEL_CONFIG=$(find target/linux/airoha -maxdepth 1 -name 'config-*' | head -n1)
-if [ -n "$KERNEL_CONFIG" ] && [ -f "$KERNEL_CONFIG" ]; then
-  echo ">>> 写入内核片段: $KERNEL_CONFIG"
-  for opt in \
-    CONFIG_CRYPTO_HW \
-    CONFIG_CRYPTO_ENGINE \
-    CONFIG_CRYPTO_DEV_EIP93 \
-    CONFIG_CRYPTO_DEV_EIP93_AES \
-    CONFIG_CRYPTO_DEV_EIP93_DES \
-    CONFIG_CRYPTO_AES_ARM64_NEON_BLK
-  do
-    sed -i "/^${opt}=/d;/^# ${opt} is not set/d" "$KERNEL_CONFIG"
-    echo "${opt}=y" >> "$KERNEL_CONFIG"
-  done
-else
-  echo "⚠️ 未找到内核配置片段，将只修改 .config"
-fi
-
-# 2) .config 直接写 CONFIG_*（主要手段）
-for opt in \
-  CONFIG_CRYPTO_HW \
-  CONFIG_CRYPTO_ENGINE \
-  CONFIG_CRYPTO_DEV_EIP93 \
-  CONFIG_CRYPTO_DEV_EIP93_AES \
-  CONFIG_CRYPTO_DEV_EIP93_DES \
-  CONFIG_CRYPTO_AES_ARM64_NEON_BLK
-do
-  sed -i "/^${opt}=/d;/^# ${opt} is not set/d" .config
-  echo "${opt}=y" >> .config
-done
-
-# 3) 关闭无效的 CE 选项
-for opt in \
-  CONFIG_CRYPTO_AES_ARM64_CE \
-  CONFIG_CRYPTO_AES_ARM64_CE_BLK \
-  CONFIG_CRYPTO_AES_ARM64_CE_CCM
-do
-  sed -i "/^${opt}/d" .config
-  echo "# ${opt} is not set" >> .config
-done
-
-# 4) 用户态包
-for pkg in PACKAGE_kmod-cryptodev PACKAGE_libopenssl-devcrypto PACKAGE_openssl-util; do
-  sed -i "/CONFIG_${pkg}/d" .config
-  echo "CONFIG_${pkg}=y" >> .config
-done
-
-echo ">>> EIP-93 配置写入完成"
 
 # =========================================================
 # 下载 Loyalsoldier 完整规则（覆盖官方包，保留编译依赖）
@@ -382,29 +328,6 @@ else
   rm -rf build_dir/target-*/sing-box-* 2>/dev/null || true
 
   echo ">>> sing-box 已固定为 1.12.22，并清理相关缓存"
-fi
-
-# 强制在 .config 中启用 EIP-93 及其依赖（确保 defconfig 不会完全抹掉）
-for opt in CONFIG_CRYPTO_ENGINE CONFIG_CRYPTO_DEV_EIP93 CONFIG_CRYPTO_DEV_EIP93_DEBUG CONFIG_CRYPTO_AES_ARM64_NEON_BLK; do
-    sed -i "/^${opt}/d" .config
-    echo "${opt}=y" >> .config
-done
-
-# =========================================================
-# 修补 EIP-93 驱动设备树匹配字符串
-# =========================================================
-echo ">>> 修补 EIP-93 驱动，添加设备树兼容字符串..."
-EIP93_MAIN="drivers/crypto/inside-secure/eip93/eip93-main.c"
-if [ -f "$EIP93_MAIN" ]; then
-    # 检查是否已包含 safexcel-eip93ies，避免重复添加
-    if ! grep -q "safexcel-eip93ies" "$EIP93_MAIN"; then
-        sed -i '/{"inside-secure,eip93", 0},/a\\t{"inside-secure,safexcel-eip93ies", 0},' "$EIP93_MAIN"
-        echo ">>> 已添加 compatible 匹配项"
-    else
-        echo ">>> 已存在匹配项，跳过"
-    fi
-else
-    echo "⚠️ 找不到 eip93-main.c，跳过修补"
 fi
 
 echo "========================================="
