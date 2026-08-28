@@ -279,15 +279,6 @@ jobs:
           echo "  ❌ files/etc/uci-defaults/99-fix-wan-mac NOT found"
         fi
         echo ""
-    
-        # ============================================================
-        # 5. 总结
-        # ============================================================
-        echo "--- 5. Summary ---"
-        echo "  ✅ Target kernel config has been modified."
-        echo "  ✅ Device tree crypto nodes added."
-        echo "  ⚠️ Please compile and flash to verify EIP-93 driver."
-        echo "========================================"
 
     - name: Compile the firmware
       id: compile
