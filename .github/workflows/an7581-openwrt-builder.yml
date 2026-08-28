@@ -243,7 +243,7 @@ jobs:
           CONFIG_PACKAGE_luci-app-airoha-npu \
           CONFIG_PACKAGE_vlmcsd \
           CONFIG_PACKAGE_openssl-util \
-          CONFIG_PACKAGE_airoha-an7583-npu-firmware
+          CONFIG_PACKAGE_airoha-en7581-npu-firmware
         do
           if grep -q "^${opt}=y" .config; then
             echo "  ✅ ${opt}=y"
