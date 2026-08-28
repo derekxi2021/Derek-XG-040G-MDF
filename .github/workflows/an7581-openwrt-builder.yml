@@ -160,24 +160,6 @@ jobs:
         echo "CONFIG_CCACHE=y" >> .config
     
         # =========================================================
-        # Go 配置：使用 OpenWrt 内部 Go（不依赖外部）
-        # =========================================================
-        echo ">>> 配置使用 OpenWrt 内部 Go..."
-        sed -i '/CONFIG_USE_EXTERNAL_HOST_GOLANG/d' .config
-        echo "# CONFIG_USE_EXTERNAL_HOST_GOLANG is not set" >> .config
-        sed -i '/CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT/d' .config
-        echo "# CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT is not set" >> .config
-        sed -i '/CONFIG_GOLANG_BUILD_BOOTSTRAP/d' .config
-        echo "CONFIG_GOLANG_BUILD_BOOTSTRAP=y" >> .config
-    
-        # =========================================================
-        # Rust 配置：禁用外部 Rust，禁用 SS-Rust
-        # =========================================================
-        echo ">>> 禁用 Rust 相关..."
-        sed -i '/CONFIG_USE_EXTERNAL_HOST_RUST/d' .config
-        echo "# CONFIG_USE_EXTERNAL_HOST_RUST is not set" >> .config
-    
-        # =========================================================
         # 强制选中需要的包
         # =========================================================
         for pkg in \
@@ -196,77 +178,6 @@ jobs:
         # 生成配置（第一次）
         # =========================================================
         make defconfig
-    
-        # =========================================================
-        # 强制关闭 SS-Rust（defconfig 可能会重新选中）
-        # =========================================================
-        for opt in \
-          luci-app-passwall2_INCLUDE_Shadowsocks_Rust_Client \
-          luci-app-passwall2_INCLUDE_Shadowsocks_Rust_Server \
-          shadowsocks-rust-sslocal \
-          shadowsocks-rust-ssserver \
-          shadowsocks-rust-ssmanager \
-          shadowsocks-rust-ssurl \
-          shadowsocks-rust-ssservice
-        do
-          sed -i "/CONFIG_PACKAGE_${opt}/d" .config
-          echo "# CONFIG_PACKAGE_${opt} is not set" >> .config
-        done
-    
-        # =========================================================
-        # 再次 defconfig 确认
-        # =========================================================
-        make defconfig
-    
-        # =========================================================
-        # 再次关闭可能被重新选中的 SS-Rust
-        # =========================================================
-        for opt in \
-          luci-app-passwall2_INCLUDE_Shadowsocks_Rust_Client \
-          luci-app-passwall2_INCLUDE_Shadowsocks_Rust_Server \
-          shadowsocks-rust-sslocal \
-          shadowsocks-rust-ssserver \
-          shadowsocks-rust-ssmanager \
-          shadowsocks-rust-ssurl \
-          shadowsocks-rust-ssservice
-        do
-          sed -i "/CONFIG_PACKAGE_${opt}/d" .config
-          echo "# CONFIG_PACKAGE_${opt} is not set" >> .config
-        done
-    
-        # =========================================================
-        # ★★★ 在 defconfig 之后，强制写入 EIP-93 配置（不执行 defconfig）★★★
-        # =========================================================
-        echo ">>> 强制启用 EIP-93 硬件加密..."
-        for opt in \
-          CONFIG_CRYPTO_HW \
-          CONFIG_CRYPTO_ENGINE \
-          CONFIG_CRYPTO_DEV_EIP93 \
-          CONFIG_CRYPTO_DEV_EIP93_AES \
-          CONFIG_CRYPTO_DEV_EIP93_DES \
-          CONFIG_CRYPTO_AES_ARM64_NEON_BLK
-        do
-          sed -i "/^${opt}=/d;/^# ${opt} is not set/d" .config
-          echo "${opt}=y" >> .config
-        done
-        for opt in \
-          CONFIG_CRYPTO_AES_ARM64_CE \
-          CONFIG_CRYPTO_AES_ARM64_CE_BLK \
-          CONFIG_CRYPTO_AES_ARM64_CE_CCM
-        do
-          sed -i "/^${opt}/d" .config
-          echo "# ${opt} is not set" >> .config
-        done
-        echo ">>> 硬件加密配置已强制写入（不执行 defconfig，以保留修改）"
-    
-        # =========================================================
-        # 诊断输出
-        # =========================================================
-        echo "========== Go 配置确认 =========="
-        grep -E 'GOLANG_EXTERNAL_BOOTSTRAP|GOLANG_BUILD_BOOTSTRAP|USE_EXTERNAL_HOST_GOLANG' .config || true
-    
-        echo "========== Rust / SS-Rust 诊断 =========="
-        grep -E 'Shadowsocks_Rust|shadowsocks-rust|EXTERNAL_HOST_RUST|PACKAGE_rust' .config || true
     
         # =========================================================
         # 下载源码
@@ -324,20 +235,6 @@ jobs:
       run: |
         cd openwrt
         
-        # 1. 在编译内核前修补 EIP-93 驱动设备树匹配
-        echo ">>> 修补 EIP-93 驱动设备树匹配..."
-        EIP93_MAIN=$(find build_dir -path "*/linux-*/drivers/crypto/inside-secure/eip93/eip93-main.c" 2>/dev/null | head -1)
-        if [ -n "$EIP93_MAIN" ] && [ -f "$EIP93_MAIN" ]; then
-          if ! grep -q "safexcel-eip93ies" "$EIP93_MAIN"; then
-            sed -i '/{"inside-secure,eip93", 0},/a\\t{"inside-secure,safexcel-eip93ies", 0},' "$EIP93_MAIN"
-            echo ">>> 已添加 compatible 匹配项到 $EIP93_MAIN"
-          else
-            echo ">>> 已存在匹配项，跳过"
-          fi
-        else
-          echo "⚠️ 未找到 eip93-main.c，驱动可能已内置或路径不同"
-        fi
-        
         # 1. Ccache
         export CCACHE_DIR=/home/runner/.ccache
         export CCACHE_BASEDIR=/workdir/openwrt
@@ -384,6 +281,28 @@ jobs:
         [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
+    - name: Check EIP-93 Module after Build
+      if: always()
+      run: |
+        cd openwrt
+        echo "========================================"
+        echo "  Post-Build: Check EIP-93 Kernel Module"
+        echo "========================================"
+        # 查找编译生成的内核模块
+        MODULES=$(find build_dir/target-*/linux-airoha_an7583/ -name "*eip93*" -o -name "*airoha_crypto*" 2>/dev/null | head -5)
+        if [ -n "$MODULES" ]; then
+          echo "✅ EIP-93 modules found:"
+          echo "$MODULES"
+        else
+          echo "❌ No EIP-93 modules found in build_dir"
+        fi
+        # 检查最终内核配置（如果有）
+        if [ -f "bin/targets/airoha/an7583/config.buildinfo" ]; then
+          echo "--- Kernel config from buildinfo ---"
+          grep -E "CRYPTO_DEV_EIP93|CRYPTO_AES_ARM64_NEON" "bin/targets/airoha/an7583/config.buildinfo" || echo "  (no match)"
+        fi
+        echo "========================================"
+        
     # 打包上传 openwrt/logs 目录供下载查看
     - name: Upload Build Logs Artifact
       uses: actions/upload-artifact@v4
