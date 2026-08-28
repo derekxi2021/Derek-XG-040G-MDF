@@ -159,24 +159,29 @@ jobs:
         # 启用 ccache
         echo "CONFIG_CCACHE=y" >> .config
     
-        # =========================================================
-        # 强制选中需要的包
-        # =========================================================
-        for pkg in \
-          airoha-en7581-npu-firmware \
-          luci-app-airoha-npu \
-          luci-i18n-airoha-npu-zh-cn \
-          vlmcsd \
-          luci-app-vlmcsd \
-          luci-i18n-vlmcsd-zh-cn
-        do
-          sed -i "s/# CONFIG_PACKAGE_${pkg} is not set/CONFIG_PACKAGE_${pkg}=y/" .config 2>/dev/null || true
-          grep -q "CONFIG_PACKAGE_${pkg}=y" .config || echo "CONFIG_PACKAGE_${pkg}=y" >> .config
-        done
-    
-        # =========================================================
-        # 生成配置（第一次）
-        # =========================================================
+        echo "========================================="
+        echo ">>> 开始下载编译所需源码包"
+        echo "========================================="
+
+        # an7581.config + diy-part2.sh 负责全部编译配置
+        # 这里不再重复修改 .config，避免配置互相覆盖或产生重复项
+
+        echo "========== 当前关键配置 =========="
+        grep -E \
+          "CONFIG_TARGET_airoha_an7581|CONFIG_AIROHA_CPU_PM_DOMAIN|CONFIG_CRYPTO_DEV_EIP93|CONFIG_PACKAGE_luci-app-airoha-npu|CONFIG_PACKAGE_airoha-en7581-npu-firmware|CONFIG_PACKAGE_luci-app-passwall2|CONFIG_PACKAGE_sing-box|CONFIG_PACKAGE_xray-core|CONFIG_PACKAGE_vlmcsd|CONFIG_CCACHE" \
+          .config || true
+
+        echo "========================================="
+
+        # 根据 an7581.config + diy-part2.sh 生成最终配置
+        make defconfig
+
+        echo "========== defconfig 后关键配置 =========="
+        grep -E \
+          "CONFIG_TARGET_airoha_an7581|CONFIG_AIROHA_CPU_PM_DOMAIN|CONFIG_CRYPTO_DEV_EIP93|CONFIG_PACKAGE_luci-app-airoha-npu|CONFIG_PACKAGE_airoha-en7581-npu-firmware|CONFIG_PACKAGE_luci-app-passwall2|CONFIG_PACKAGE_sing-box|CONFIG_PACKAGE_xray-core|CONFIG_PACKAGE_vlmcsd|CONFIG_CCACHE" \
+          .config || true
+
+        echo "========================================="
         make defconfig
     
         # =========================================================
@@ -190,45 +195,95 @@ jobs:
       run: |
         cd openwrt
 
-        # =========================================================
-        # 🔍 硬件加密配置状态检查
-        # =========================================================
+        echo "========================================"
+        echo "     Debug Check Custom Changes"
+        echo "========================================"
         echo ""
-        echo "========== 🔍 硬件加密配置状态 =========="
-        echo "--- CONFIG_CRYPTO_DEV_EIP93 ---"
-        grep "^CONFIG_CRYPTO_DEV_EIP93" .config || echo "❌ 未设置"
-        echo "--- CONFIG_CRYPTO_ENGINE ---"
-        grep "^CONFIG_CRYPTO_ENGINE" .config || echo "❌ 未设置"
-        echo "--- CONFIG_CRYPTO_AES_ARM64_NEON_BLK ---"
-        grep "^CONFIG_CRYPTO_AES_ARM64_NEON_BLK" .config || echo "❌ 未设置"
-        
-        echo "--- target/linux/airoha/config-* ---"
-        KC=$(find target/linux/airoha -maxdepth 1 -name 'config-*' | head -n1)
-        echo "file=$KC"
-        grep -E 'EIP93|CRYPTO_ENGINE|CRYPTO_HW' "$KC" 2>/dev/null || echo "⚠️ 片段无 EIP93"
     
-        echo "=========================================="
+        # ============================================================
+        # 1. 检查 target/linux/airoha/config-6.18 中的内核配置（真实生效）
+        # ============================================================
+        echo "--- 1. Kernel Config (target config) ---"
+        KERNEL_CONFIG="target/linux/airoha/config-6.18"
+        if [ -f "$KERNEL_CONFIG" ]; then
+          for opt in \
+            CONFIG_CRYPTO_HW \
+            CONFIG_CRYPTO_DEV_EIP93 \
+            CONFIG_CRYPTO_DEV_EIP93_AES \
+            CONFIG_CRYPTO_DEV_EIP93_DES \
+            CONFIG_CRYPTO_AES_ARM64_NEON_BLK \
+            CONFIG_CRYPTO_AES_ARM64_CE \
+            CONFIG_CRYPTO_AES_ARM64_CE_BLK \
+            CONFIG_ARM64_CRYPTO_AES \
+            CONFIG_ARM64_CRYPTO_AES_NEON_BLK
+          do
+            if grep -q "^${opt}=y" "$KERNEL_CONFIG"; then
+              echo "  ✅ ${opt}=y (in target config)"
+            elif grep -q "^${opt}=m" "$KERNEL_CONFIG"; then
+              echo "  ⚠️ ${opt}=m (in target config, module)"
+            else
+              echo "  ❌ ${opt} NOT found in target config"
+            fi
+          done
+          # 显示文件中相关配置的行（如果有）
+          echo "  ---相关配置行---"
+          grep -E "CRYPTO_DEV_EIP93|CRYPTO_AES_ARM64_NEON|ARM64_CRYPTO_AES" "$KERNEL_CONFIG" || echo "  (无匹配行)"
+        else
+          echo "  ⚠️ $KERNEL_CONFIG not found"
+        fi
+        echo ""
+    
+        # ============================================================
+        # 2. 检查 .config 中的用户态配置（包选择等）
+        # ============================================================
+        echo "--- 2. User Config (.config) ---"
+        for opt in \
+          CONFIG_CRYPTO_DEV_EIP93 \
+          CONFIG_CRYPTO_AES_ARM64_NEON_BLK \
+          CONFIG_PACKAGE_luci-app-airoha-npu \
+          CONFIG_PACKAGE_vlmcsd \
+          CONFIG_PACKAGE_openssl-util \
+          CONFIG_PACKAGE_airoha-an7583-npu-firmware
+        do
+          if grep -q "^${opt}=y" .config; then
+            echo "  ✅ ${opt}=y"
+          elif grep -q "^${opt}=m" .config; then
+            echo "  ⚠️ ${opt}=m"
+          else
+            echo "  ❌ ${opt} NOT found"
+          fi
+        done
+        echo ""
+    
+        # ============================================================
+        # 3. 检查设备树文件中的节点
+        # ============================================================
+        echo "--- 3. Device Tree Nodes ---"
+        DTS_FILES=$(find target/linux/airoha/dts/ -name "*.dtsi" -o -name "*.dts" 2>/dev/null | grep -E "an7581|xg-040g-md" || true)
+        if [ -n "$DTS_FILES" ]; then
+          for dts in $DTS_FILES; do
+            if grep -q "crypto@" "$dts" 2>/dev/null; then
+              echo "  ✅ crypto node found in $dts"
+            else
+              echo "  ❌ crypto node NOT found in $dts"
+            fi
+          done
+        else
+          echo "  ⚠️ No DTS files found matching an7581/xg-040g-md"
+        fi
+        echo ""
+    
+        # ============================================================
+        # 4. 检查 files/ 目录中的运行时配置（LED 启动脚本）
+        # ============================================================
+        echo "--- 4. Runtime Config (files/) ---"
+        if [ -f "files/etc/uci-defaults/99-fix-wan-mac" ]; then
+          echo "  ✅ files/etc/uci-defaults/99-fix-wan-mac exists"
+        else
+          echo "  ❌ files/etc/uci-defaults/99-fix-wan-mac NOT found"
+        fi
         echo ""
 
-        echo "========== 1. .config 关键包是否选中 =========="
-        grep -E "CONFIG_PACKAGE_(airoha-en7581-npu-firmware|luci-app-airoha-npu|luci-i18n-airoha-npu|vlmcsd|luci-app-vlmcsd)=y" .config || echo "⚠️ 以上包有缺失"
-    
-        echo ""
-        echo "========== 2. package/ 目录是否有 luci-app-airoha-npu =========="
-        if [ -d "package/luci-app-airoha-npu" ]; then
-          echo "✔ package/luci-app-airoha-npu 存在"
-          ls package/luci-app-airoha-npu/
-        else
-          echo "❌ package/luci-app-airoha-npu 不存在！clone 失败"
-        fi
-    
-        echo ""
-        echo "========== 3. feeds 里是否有 vlmcsd =========="
-        find feeds -type d -name "*vlmcsd*" 2>/dev/null || echo "❌ feeds 里找不到 vlmcsd"
-    
-        echo ""
-        echo "========== 4. 最终确认关键 CONFIG 行 =========="
-        grep -n "airoha-npu\|vlmcsd\|airoha-en7581-npu" .config || true
 
     - name: Compile the firmware
       id: compile
