@@ -392,36 +392,6 @@ else
 fi
 
 # ============================================================
-# 启用 ChaCha20 和 Poly1305 NEON 加速（WireGuard 优化）
-# ============================================================
-echo ">>> 正在启用 ChaCha20 / Poly1305 内核支持..."
-
-# 查找内核配置文件
-KERNEL_CONFIG=$(find target/linux/airoha/ -maxdepth 1 -name "config-*" 2>/dev/null | head -1)
-
-if [ -n "$KERNEL_CONFIG" ] && [ -f "$KERNEL_CONFIG" ]; then
-    # 添加所有必需的配置
-    for opt in \
-      "CONFIG_CRYPTO_CHACHA20=y" \
-      "CONFIG_CRYPTO_POLY1305=y" \
-      "CONFIG_CRYPTO_CHACHA20POLY1305=y" \
-      "CONFIG_CRYPTO_CHACHA20_NEON=y" \
-      "CONFIG_CRYPTO_POLY1305_NEON=y"
-    do
-        opt_name="${opt%=*}"
-        if ! grep -q "^${opt_name}=" "$KERNEL_CONFIG"; then
-            echo "$opt" >> "$KERNEL_CONFIG"
-            echo ">>> 已添加 $opt"
-        else
-            echo ">>> $opt 已存在"
-        fi
-    done
-    echo ">>> ChaCha20/Poly1305 内核配置完成"
-else
-    echo "⚠️ 未找到内核配置文件，跳过"
-fi
-
-# ============================================================
 # 临时修复：Airoha AN7583 PPPoE 掉线问题 (Issue #24715)
 # 来源：https://github.com/VitaliySochniy/openwrt/commits/airoha-fix-ring-head-refill-race/
 # ============================================================
