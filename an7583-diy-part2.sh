@@ -365,6 +365,30 @@ else
     echo ">>> ⚠️ EIP-93 配置未启用"
 fi
 
+# ============================================================
+# 临时修复：Airoha AN7583 PPPoE 掉线问题 (Issue #24715)
+# 来源：https://github.com/VitaliySochniy/openwrt/commits/airoha-fix-ring-head-refill-race/
+# ============================================================
+echo ">>> 应用 Airoha AN7583 PPPoE 修复补丁..."
+
+# 进入 OpenWrt 源码目录
+cd openwrt
+
+# 使用 wget 依次下载并应用三个补丁
+# 补丁 1: cadfaa6840 - 处理缺失的中断
+wget -O - https://github.com/VitaliySochniy/openwrt/commit/cadfaa6840.patch | patch -p1
+
+# 补丁 2: 7f37ab604d - 检测并恢复 ring-4 竞争条件
+wget -O - https://github.com/VitaliySochniy/openwrt/commit/7f37ab604d.patch | patch -p1
+
+# 补丁 3: 6518b6179f - 将 ring 4 从 16 增加到 128 个描述符
+wget -O - https://github.com/VitaliySochniy/openwrt/commit/6518b6179f.patch | patch -p1
+
+# 返回工作目录
+cd $GITHUB_WORKSPACE
+
+echo ">>> Airoha PPPoE 修复补丁已应用"
+
 echo "========================================="
 echo ">>> diy-part2.sh 全部执行完毕！"
 echo "========================================="
