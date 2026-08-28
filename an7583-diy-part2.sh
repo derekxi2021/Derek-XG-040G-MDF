@@ -345,6 +345,32 @@ else
   echo ">>> sing-box 已固定为 1.12.22，并清理相关缓存"
 fi
 
+# ============================================================
+# 为 Sing-Box 和 Xray 启用 ARM64 加密指令（AES + PMULL）
+# ============================================================
+echo ">>> 正在为 Sing-Box 和 Xray 启用 ARM64 加密指令..."
+
+# 定义要处理的包列表
+PKGS="sing-box xray-core"
+
+for PKG in $PKGS; do
+    # 查找 Makefile（可能在不同位置）
+    MK_FILE="feeds/packages/net/$PKG/Makefile"
+    [ ! -f "$MK_FILE" ] && MK_FILE="package/feeds/packages/net/$PKG/Makefile"
+    [ ! -f "$MK_FILE" ] && continue
+
+    echo ">>> 处理 $MK_FILE"
+
+    # 如果尚未添加 GOARM64，则插入
+    if ! grep -q "export GOARM64=8.0" "$MK_FILE"; then
+        sed -i '1i export GOARM64=8.0' "$MK_FILE"
+        echo ">>> 已为 $PKG 添加 GOARM64=8.0"
+    fi
+
+    # 可选：添加编译标签以强制启用加密（如果包支持）
+    # 但通常不需要，因为 Go 默认会检测 CPU 特性
+done
+
 echo ">>> 强制验证硬件加密配置..."
 
 if grep -q '^# CONFIG_KERNEL_CRYPTO_DEV_EIP93 is not set' .config; then
@@ -363,6 +389,36 @@ if grep -q '^CONFIG_KERNEL_CRYPTO_DEV_EIP93=y' .config; then
     echo ">>> ✅ EIP-93 配置已启用"
 else
     echo ">>> ⚠️ EIP-93 配置未启用"
+fi
+
+# ============================================================
+# 启用 ChaCha20 和 Poly1305 NEON 加速（WireGuard 优化）
+# ============================================================
+echo ">>> 正在启用 ChaCha20 / Poly1305 内核支持..."
+
+# 查找内核配置文件
+KERNEL_CONFIG=$(find target/linux/airoha/ -maxdepth 1 -name "config-*" 2>/dev/null | head -1)
+
+if [ -n "$KERNEL_CONFIG" ] && [ -f "$KERNEL_CONFIG" ]; then
+    # 添加所有必需的配置
+    for opt in \
+      "CONFIG_CRYPTO_CHACHA20=y" \
+      "CONFIG_CRYPTO_POLY1305=y" \
+      "CONFIG_CRYPTO_CHACHA20POLY1305=y" \
+      "CONFIG_CRYPTO_CHACHA20_NEON=y" \
+      "CONFIG_CRYPTO_POLY1305_NEON=y"
+    do
+        opt_name="${opt%=*}"
+        if ! grep -q "^${opt_name}=" "$KERNEL_CONFIG"; then
+            echo "$opt" >> "$KERNEL_CONFIG"
+            echo ">>> 已添加 $opt"
+        else
+            echo ">>> $opt 已存在"
+        fi
+    done
+    echo ">>> ChaCha20/Poly1305 内核配置完成"
+else
+    echo "⚠️ 未找到内核配置文件，跳过"
 fi
 
 # ============================================================
