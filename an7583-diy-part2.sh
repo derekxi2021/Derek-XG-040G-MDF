@@ -415,6 +415,20 @@ cd $GITHUB_WORKSPACE
 
 echo ">>> Airoha PPPoE 修复补丁已应用"
 
+# ============================================================
+# [DIY-P2] 锁定 passwall2 版本为 25.8.22
+# ============================================================
+echo ">>> [DIY-P2] 正在锁定 feeds/passwall2 到版本 25.8.22..."
+if [ -d "feeds/passwall2" ]; then
+    cd feeds/passwall2
+    git fetch --tags
+    # 如果仓库中的 Tag 带有 v 前缀（如 v25.8.22），请改成 v25.8.22
+    git checkout 25.8.22 || git checkout v25.8.22 || echo "⚠️ passwall2 版本切换失败，将使用默认版本"
+    cd -
+else
+    echo "⚠️ 未找到 feeds/passwall2 目录，跳过版本锁定"
+fi
+
 echo "========================================="
 echo ">>> diy-part2.sh 全部执行完毕！"
 echo "========================================="
