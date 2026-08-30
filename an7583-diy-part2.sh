@@ -418,15 +418,41 @@ echo ">>> Airoha PPPoE 修复补丁已应用"
 # ============================================================
 # [DIY-P2] 锁定 passwall2 版本为 25.8.22
 # ============================================================
-echo ">>> [DIY-P2] 正在锁定 feeds/passwall2 到版本 25.8.22..."
-if [ -d "feeds/passwall2" ]; then
-    cd feeds/passwall2
-    git fetch --tags
-    # 如果仓库中的 Tag 带有 v 前缀（如 v25.8.22），请改成 v25.8.22
-    git checkout 25.8.22 || git checkout v25.8.22 || echo "⚠️ passwall2 版本切换失败，将使用默认版本"
-    cd -
+echo ">>> [DIY-P2] 正在锁定 passwall2 到版本 25.8.22..."
+
+# 尝试定位 passwall2 的实际目录
+PW2_DIR=""
+for possible_path in \
+    "feeds/passwall2" \
+    "feeds/luci/applications/luci-app-passwall2" \
+    "package/feeds/passwall2" \
+    "package/feeds/luci-app-passwall2"
+do
+    if [ -d "$possible_path" ]; then
+        PW2_DIR="$possible_path"
+        break
+    fi
+done
+
+# 如果仍未找到，使用 find 查找
+if [ -z "$PW2_DIR" ]; then
+    PW2_DIR=$(find feeds -type d \( -name "passwall2" -o -name "luci-app-passwall2" \) 2>/dev/null | head -n1)
+fi
+
+if [ -n "$PW2_DIR" ] && [ -d "$PW2_DIR" ]; then
+    echo ">>> 找到 passwall2 目录: $PW2_DIR"
+    cd "$PW2_DIR"
+    # 获取远程 tags
+    git fetch --tags --depth=1 2>/dev/null || git fetch --tags
+    # 尝试检出 tag（带 v 或不带 v）
+    if git checkout 25.8.22 2>/dev/null || git checkout v25.8.22 2>/dev/null; then
+        echo ">>> passwall2 已锁定到 25.8.22"
+    else
+        echo "⚠️ 未找到 tag 25.8.22，尝试使用默认版本"
+    fi
+    cd - >/dev/null
 else
-    echo "⚠️ 未找到 feeds/passwall2 目录，跳过版本锁定"
+    echo "⚠️ 未找到 passwall2 目录，跳过版本锁定"
 fi
 
 echo "========================================="
