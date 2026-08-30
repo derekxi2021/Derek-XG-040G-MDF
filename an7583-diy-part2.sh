@@ -416,51 +416,49 @@ cd $GITHUB_WORKSPACE
 echo ">>> Airoha PPPoE 修复补丁已应用"
 
 # ============================================================
-# [DIY-P2] 锁定 passwall2 版本为 25.8.22
+# [DIY-P2] 锁定 passwall2 版本为 25.8.22-1
 # ============================================================
-echo ">>> [DIY-P2] 正在锁定 passwall2 到版本 25.8.22..."
+echo ">>> [DIY-P2] 正在锁定 passwall2 到 25.8.22-1..."
 
-PW2_DIR=""
-# 常见可能路径
-for path in \
-    "feeds/passwall2" \
-    "feeds/luci/applications/luci-app-passwall2" \
-    "package/feeds/passwall2" \
-    "package/feeds/luci-app-passwall2"
-do
-    if [ -d "$path" ]; then
-        PW2_DIR="$path"
-        break
+# 1. 先彻底清理所有可能存在的 passwall2
+rm -rf feeds/passwall2
+rm -rf feeds/luci/applications/luci-app-passwall2
+rm -rf package/feeds/passwall2
+rm -rf package/feeds/luci-app-passwall2
+rm -rf package/luci-app-passwall2
+rm -rf package/passwall2
+
+# 2. 直接克隆指定版本到 package 目录（最可靠）
+git clone --depth 1 --branch 25.8.22-1 \
+  https://github.com/Openwrt-Passwall/openwrt-passwall2.git \
+  /tmp/passwall2-tmp
+
+if [ -d /tmp/passwall2-tmp/luci-app-passwall2 ]; then
+    cp -a /tmp/passwall2-tmp/luci-app-passwall2 package/luci-app-passwall2
+    echo ">>> ✅ 已成功锁定 luci-app-passwall2 到 25.8.22-1"
+else
+    echo ">>> ⚠️ 克隆失败或目录结构异常，尝试不带 -1 的 tag..."
+    rm -rf /tmp/passwall2-tmp
+    git clone --depth 1 --branch 25.8.22 \
+      https://github.com/Openwrt-Passwall/openwrt-passwall2.git \
+      /tmp/passwall2-tmp
+    if [ -d /tmp/passwall2-tmp/luci-app-passwall2 ]; then
+        cp -a /tmp/passwall2-tmp/luci-app-passwall2 package/luci-app-passwall2
+        echo ">>> ✅ 已成功锁定到 25.8.22"
+    else
+        echo ">>> ❌ 锁定失败，将使用 feeds 默认版本"
     fi
-done
-
-# 如果没找到，用 find 搜索
-if [ -z "$PW2_DIR" ]; then
-    PW2_DIR=$(find feeds -type d \( -name "passwall2" -o -name "luci-app-passwall2" \) 2>/dev/null | head -n1)
 fi
 
-if [ -n "$PW2_DIR" ] && [ -d "$PW2_DIR" ]; then
-    echo ">>> 找到 passwall2 目录: $PW2_DIR"
-    cd "$PW2_DIR" || exit 1
-    # 获取远程 tags（如果 .git 存在）
-    if [ -d ".git" ]; then
-        git fetch --tags --depth=1 2>/dev/null || git fetch --tags
-        if git checkout 25.8.22 2>/dev/null || git checkout v25.8.22 2>/dev/null; then
-            echo ">>> passwall2 已锁定到 25.8.22"
-        else
-            echo "⚠️ 未找到 tag 25.8.22，使用默认版本"
-        fi
-    else
-        echo "⚠️ $PW2_DIR 不是 git 仓库，无法切换版本"
-    fi
-    cd - >/dev/null
-else
-    echo "⚠️ 未找到 passwall2 目录，尝试从 GitHub 克隆指定版本..."
-    # 备用方案：直接克隆到 package 目录
-    rm -rf package/luci-app-passwall2
-    git clone --depth 1 --branch 25.8.22 https://github.com/xiangtailiang/openwrt-packages.git package/luci-app-passwall2 2>/dev/null || \
-    git clone --depth 1 --branch v25.8.22 https://github.com/xiangtailiang/openwrt-packages.git package/luci-app-passwall2 2>/dev/null || \
-    echo "⚠️ 克隆指定版本失败，将使用 feeds 中的默认版本"
+rm -rf /tmp/passwall2-tmp
+
+# 3. 修正 Makefile 的 include 路径（防止编译报错）
+if [ -f package/luci-app-passwall2/Makefile ]; then
+    sed -i 's|include ../../luci.mk|include $(TOPDIR)/feeds/luci/luci.mk|g' \
+        package/luci-app-passwall2/Makefile 2>/dev/null || true
+    echo ">>> Makefile 路径已修正"
+    # 验证版本
+    grep -E "PKG_VERSION|PKG_RELEASE" package/luci-app-passwall2/Makefile || true
 fi
 
 echo "========================================="
