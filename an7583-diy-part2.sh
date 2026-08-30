@@ -415,50 +415,30 @@ cd $GITHUB_WORKSPACE
 
 echo ">>> Airoha PPPoE 修复补丁已应用"
 
-# ============================================================
-# [DIY-P2] 锁定 passwall2 版本为 25.8.22-1
+# # ============================================================
+# [DIY-P2] 锁定 passwall2 版本为 25.8.22-1（正确目录结构）
 # ============================================================
 echo ">>> [DIY-P2] 正在锁定 passwall2 到 25.8.22-1..."
 
-# 1. 先彻底清理所有可能存在的 passwall2
+# 1. 清理所有 feeds 和 package 中的 passwall2 残留
 rm -rf feeds/passwall2
-rm -rf feeds/luci/applications/luci-app-passwall2
 rm -rf package/feeds/passwall2
-rm -rf package/feeds/luci-app-passwall2
-rm -rf package/luci-app-passwall2
 rm -rf package/passwall2
 
-# 2. 直接克隆指定版本到 package 目录（最可靠）
-git clone --depth 1 --branch 25.8.22-1 \
-  https://github.com/Openwrt-Passwall/openwrt-passwall2.git \
-  /tmp/passwall2-tmp
-
-if [ -d /tmp/passwall2-tmp/luci-app-passwall2 ]; then
-    cp -a /tmp/passwall2-tmp/luci-app-passwall2 package/luci-app-passwall2
-    echo ">>> ✅ 已成功锁定 luci-app-passwall2 到 25.8.22-1"
+# 2. 直接将对应 Tag 克隆为 package/passwall2
+if git clone --depth 1 --branch 25.8.22-1 https://github.com/Openwrt-Passwall/openwrt-passwall2.git package/passwall2; then
+    echo ">>> ✅ 已成功克隆 passwall2 (25.8.22-1) 到 package/passwall2"
+elif git clone --depth 1 --branch 25.8.22 https://github.com/Openwrt-Passwall/openwrt-passwall2.git package/passwall2; then
+    echo ">>> ✅ 已成功克隆 passwall2 (25.8.22) 到 package/passwall2"
 else
-    echo ">>> ⚠️ 克隆失败或目录结构异常，尝试不带 -1 的 tag..."
-    rm -rf /tmp/passwall2-tmp
-    git clone --depth 1 --branch 25.8.22 \
-      https://github.com/Openwrt-Passwall/openwrt-passwall2.git \
-      /tmp/passwall2-tmp
-    if [ -d /tmp/passwall2-tmp/luci-app-passwall2 ]; then
-        cp -a /tmp/passwall2-tmp/luci-app-passwall2 package/luci-app-passwall2
-        echo ">>> ✅ 已成功锁定到 25.8.22"
-    else
-        echo ">>> ❌ 锁定失败，将使用 feeds 默认版本"
-    fi
+    echo ">>> ⚠️ 指定 Tag 克隆失败，回退使用 feeds 默认版本"
 fi
 
-rm -rf /tmp/passwall2-tmp
-
-# 3. 修正 Makefile 的 include 路径（防止编译报错）
-if [ -f package/luci-app-passwall2/Makefile ]; then
-    sed -i 's|include ../../luci.mk|include $(TOPDIR)/feeds/luci/luci.mk|g' \
-        package/luci-app-passwall2/Makefile 2>/dev/null || true
-    echo ">>> Makefile 路径已修正"
-    # 验证版本
-    grep -E "PKG_VERSION|PKG_RELEASE" package/luci-app-passwall2/Makefile || true
+# 3. 修正 Makefile 的 include 路径（feeds 转换到本地 package 必须）
+if [ -f package/passwall2/Makefile ]; then
+    sed -i 's|include ../../luci.mk|include $(TOPDIR)/feeds/luci/luci.mk|g' package/passwall2/Makefile 2>/dev/null || true
+    echo ">>> package/passwall2/Makefile 路径已修正"
+    grep -E "PKG_VERSION|PKG_RELEASE" package/passwall2/Makefile || true
 fi
 
 echo "========================================="
