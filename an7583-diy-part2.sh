@@ -420,39 +420,47 @@ echo ">>> Airoha PPPoE 修复补丁已应用"
 # ============================================================
 echo ">>> [DIY-P2] 正在锁定 passwall2 到版本 25.8.22..."
 
-# 尝试定位 passwall2 的实际目录
 PW2_DIR=""
-for possible_path in \
+# 常见可能路径
+for path in \
     "feeds/passwall2" \
     "feeds/luci/applications/luci-app-passwall2" \
     "package/feeds/passwall2" \
     "package/feeds/luci-app-passwall2"
 do
-    if [ -d "$possible_path" ]; then
-        PW2_DIR="$possible_path"
+    if [ -d "$path" ]; then
+        PW2_DIR="$path"
         break
     fi
 done
 
-# 如果仍未找到，使用 find 查找
+# 如果没找到，用 find 搜索
 if [ -z "$PW2_DIR" ]; then
     PW2_DIR=$(find feeds -type d \( -name "passwall2" -o -name "luci-app-passwall2" \) 2>/dev/null | head -n1)
 fi
 
 if [ -n "$PW2_DIR" ] && [ -d "$PW2_DIR" ]; then
     echo ">>> 找到 passwall2 目录: $PW2_DIR"
-    cd "$PW2_DIR"
-    # 获取远程 tags
-    git fetch --tags --depth=1 2>/dev/null || git fetch --tags
-    # 尝试检出 tag（带 v 或不带 v）
-    if git checkout 25.8.22 2>/dev/null || git checkout v25.8.22 2>/dev/null; then
-        echo ">>> passwall2 已锁定到 25.8.22"
+    cd "$PW2_DIR" || exit 1
+    # 获取远程 tags（如果 .git 存在）
+    if [ -d ".git" ]; then
+        git fetch --tags --depth=1 2>/dev/null || git fetch --tags
+        if git checkout 25.8.22 2>/dev/null || git checkout v25.8.22 2>/dev/null; then
+            echo ">>> passwall2 已锁定到 25.8.22"
+        else
+            echo "⚠️ 未找到 tag 25.8.22，使用默认版本"
+        fi
     else
-        echo "⚠️ 未找到 tag 25.8.22，尝试使用默认版本"
+        echo "⚠️ $PW2_DIR 不是 git 仓库，无法切换版本"
     fi
     cd - >/dev/null
 else
-    echo "⚠️ 未找到 passwall2 目录，跳过版本锁定"
+    echo "⚠️ 未找到 passwall2 目录，尝试从 GitHub 克隆指定版本..."
+    # 备用方案：直接克隆到 package 目录
+    rm -rf package/luci-app-passwall2
+    git clone --depth 1 --branch 25.8.22 https://github.com/xiangtailiang/openwrt-packages.git package/luci-app-passwall2 2>/dev/null || \
+    git clone --depth 1 --branch v25.8.22 https://github.com/xiangtailiang/openwrt-packages.git package/luci-app-passwall2 2>/dev/null || \
+    echo "⚠️ 克隆指定版本失败，将使用 feeds 中的默认版本"
 fi
 
 echo "========================================="
