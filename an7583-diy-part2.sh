@@ -415,30 +415,37 @@ cd $GITHUB_WORKSPACE
 
 echo ">>> Airoha PPPoE 修复补丁已应用"
 
-# # ============================================================
+# ============================================================
 # [DIY-P2] 锁定 passwall2 版本为 25.8.22-1（正确目录结构）
 # ============================================================
 echo ">>> [DIY-P2] 正在锁定 passwall2 到 25.8.22-1..."
 
-# 1. 清理所有 feeds 和 package 中的 passwall2 残留
+# 1. 彻底移除 feed 源（防止后续 update 重新拉取）
+sed -i '/passwall2/d' feeds.conf.default 2>/dev/null || true
+sed -i '/passwall2/d' feeds.conf 2>/dev/null || true
+
+# 2. 清理所有残留
 rm -rf feeds/passwall2
 rm -rf package/feeds/passwall2
 rm -rf package/passwall2
 
-# 2. 直接将对应 Tag 克隆为 package/passwall2
+# 3. 直接从指定 tag 克隆到 package/passwall2
 if git clone --depth 1 --branch 25.8.22-1 https://github.com/Openwrt-Passwall/openwrt-passwall2.git package/passwall2; then
     echo ">>> ✅ 已成功克隆 passwall2 (25.8.22-1) 到 package/passwall2"
 elif git clone --depth 1 --branch 25.8.22 https://github.com/Openwrt-Passwall/openwrt-passwall2.git package/passwall2; then
     echo ">>> ✅ 已成功克隆 passwall2 (25.8.22) 到 package/passwall2"
 else
-    echo ">>> ⚠️ 指定 Tag 克隆失败，回退使用 feeds 默认版本"
+    echo ">>> ⚠️ 指定 Tag 克隆失败，尝试从 master 克隆（不推荐）"
+    git clone --depth 1 https://github.com/Openwrt-Passwall/openwrt-passwall2.git package/passwall2
 fi
 
-# 3. 修正 Makefile 的 include 路径（feeds 转换到本地 package 必须）
-if [ -f package/passwall2/Makefile ]; then
-    sed -i 's|include ../../luci.mk|include $(TOPDIR)/feeds/luci/luci.mk|g' package/passwall2/Makefile 2>/dev/null || true
-    echo ">>> package/passwall2/Makefile 路径已修正"
-    grep -E "PKG_VERSION|PKG_RELEASE" package/passwall2/Makefile || true
+# 4. 修正 Makefile 路径（确保本地包被正确编译）
+if [ -f package/passwall2/luci-app-passwall2/Makefile ]; then
+    sed -i 's|include ../../luci.mk|include $(TOPDIR)/feeds/luci/luci.mk|g' package/passwall2/luci-app-passwall2/Makefile 2>/dev/null || true
+fi
+if [ -f package/passwall2/passwall2/Makefile ]; then
+    # 可加其他修正
+    echo ">>> passwall2 core Makefile found"
 fi
 
 echo "========================================="
