@@ -415,26 +415,6 @@ cd $GITHUB_WORKSPACE
 
 echo ">>> Airoha PPPoE 修复补丁已应用"
 
-# =========================================================
-# Fix PassWall2 DNS 2002 port deadlock bug
-# 禁用 PassWall2 自动写入 no-resolv 及 2002 端口转发配置
-# =========================================================
-
-# 1. 查找并注释 PassWall2 启动脚本中写入 dnsmasq 配置的相关行
-find package/ feeds/ -type f -name "*passwall*" -path "*/app/*" 2>/dev/null | xargs grep -l "2002" | while read -r file; do
-    echo "Patching PW2 DNS logic in: $file"
-    # 注释掉写入 no-resolv 的逻辑
-    sed -i 's/.*no-resolv.*/# &/g' "$file"
-    # 或者将 2002 端口强制替换掉/注释生成代码
-    sed -i 's/.*server=127.0.0.1#2002.*/# &/g' "$file"
-done
-
-# 2. 如果 PassWall2 包含 uci 默认配置文件，默认关闭 DNS 重定向
-find package/ feeds/ -type f -name "passwall2" -path "*/etc/config/*" 2>/dev/null | while read -r file; do
-    sed -i "s/option dns_redirect '1'/option dns_redirect '0'/g" "$file"
-    sed -i "s/option remote_dns_protocol 'dnsmasq'/option remote_dns_protocol 'remote'/g" "$file"
-done
-
 echo "========================================="
 echo ">>> diy-part2.sh 全部执行完毕！"
 echo "========================================="
