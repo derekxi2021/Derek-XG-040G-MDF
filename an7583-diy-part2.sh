@@ -415,38 +415,25 @@ cd $GITHUB_WORKSPACE
 
 echo ">>> Airoha PPPoE 修复补丁已应用"
 
-# ============================================================
-# [DIY-P2] 锁定 passwall2 版本为 25.8.22-1（正确目录结构）
-# ============================================================
-echo ">>> [DIY-P2] 正在锁定 passwall2 到 25.8.22-1..."
+# =========================================================
+# Fix PassWall2 DNS 2002 port deadlock bug
+# 禁用 PassWall2 自动写入 no-resolv 及 2002 端口转发配置
+# =========================================================
 
-# 1. 彻底移除 feed 源（防止后续 update 重新拉取）
-sed -i '/passwall2/d' feeds.conf.default 2>/dev/null || true
-sed -i '/passwall2/d' feeds.conf 2>/dev/null || true
+# 1. 查找并注释 PassWall2 启动脚本中写入 dnsmasq 配置的相关行
+find package/ feeds/ -type f -name "*passwall*" -path "*/app/*" 2>/dev/null | xargs grep -l "2002" | while read -r file; do
+    echo "Patching PW2 DNS logic in: $file"
+    # 注释掉写入 no-resolv 的逻辑
+    sed -i 's/.*no-resolv.*/# &/g' "$file"
+    # 或者将 2002 端口强制替换掉/注释生成代码
+    sed -i 's/.*server=127.0.0.1#2002.*/# &/g' "$file"
+done
 
-# 2. 清理所有残留
-rm -rf feeds/passwall2
-rm -rf package/feeds/passwall2
-rm -rf package/passwall2
-
-# 3. 直接从指定 tag 克隆到 package/passwall2
-if git clone --depth 1 --branch 25.8.22-1 https://github.com/Openwrt-Passwall/openwrt-passwall2.git package/passwall2; then
-    echo ">>> ✅ 已成功克隆 passwall2 (25.8.22-1) 到 package/passwall2"
-elif git clone --depth 1 --branch 25.8.22 https://github.com/Openwrt-Passwall/openwrt-passwall2.git package/passwall2; then
-    echo ">>> ✅ 已成功克隆 passwall2 (25.8.22) 到 package/passwall2"
-else
-    echo ">>> ⚠️ 指定 Tag 克隆失败，尝试从 master 克隆（不推荐）"
-    git clone --depth 1 https://github.com/Openwrt-Passwall/openwrt-passwall2.git package/passwall2
-fi
-
-# 4. 修正 Makefile 路径（确保本地包被正确编译）
-if [ -f package/passwall2/luci-app-passwall2/Makefile ]; then
-    sed -i 's|include ../../luci.mk|include $(TOPDIR)/feeds/luci/luci.mk|g' package/passwall2/luci-app-passwall2/Makefile 2>/dev/null || true
-fi
-if [ -f package/passwall2/passwall2/Makefile ]; then
-    # 可加其他修正
-    echo ">>> passwall2 core Makefile found"
-fi
+# 2. 如果 PassWall2 包含 uci 默认配置文件，默认关闭 DNS 重定向
+find package/ feeds/ -type f -name "passwall2" -path "*/etc/config/*" 2>/dev/null | while read -r file; do
+    sed -i "s/option dns_redirect '1'/option dns_redirect '0'/g" "$file"
+    sed -i "s/option remote_dns_protocol 'dnsmasq'/option remote_dns_protocol 'remote'/g" "$file"
+done
 
 echo "========================================="
 echo ">>> diy-part2.sh 全部执行完毕！"
