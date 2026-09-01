@@ -97,10 +97,10 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~/.ccache
-        key: ${{ runner.os }}-openwrt-ccache-an7581xtl-${{ github.ref_name }}
+        key: ${{ runner.os }}-openwrt-ccache-an7581-immortalwrt-${{ github.ref_name }}
         restore-keys: |
-          ${{ runner.os }}-openwrt-ccache-an7581xtl-${{ github.ref_name }}
-          ${{ runner.os }}-openwrt-ccache-an7581xtl-
+          ${{ runner.os }}-openwrt-ccache-an7581-immortalwrt-${{ github.ref_name }}
+          ${{ runner.os }}-openwrt-ccache-an7581-immortalwrt-
           ${{ runner.os }}-openwrt-ccache-
     
     - name: Cache Host Tools
@@ -110,10 +110,10 @@ jobs:
           /workdir/openwrt/staging_dir/host
           /workdir/openwrt/staging_dir/hostpkg
         # 不要用 hashFiles(feeds/...)，除非放在 feeds update 之后且路径带 openwrt/
-        key: ${{ runner.os }}-openwrt-host-an7581xtl-${{ github.ref_name }}-v3
+        key: ${{ runner.os }}-openwrt-host-an7581-immortalwrt-${{ github.ref_name }}-v3
         restore-keys: |
-          ${{ runner.os }}-openwrt-host-an7581xtl-${{ github.ref_name }}-
-          ${{ runner.os }}-openwrt-host-an7581xtl-
+          ${{ runner.os }}-openwrt-host-an7581-immortalwrt-${{ github.ref_name }}-
+          ${{ runner.os }}-openwrt-host-an7581-immortalwrt-
 
     # 4. 初始化 ccache 参数
     - name: Init Ccache Config
