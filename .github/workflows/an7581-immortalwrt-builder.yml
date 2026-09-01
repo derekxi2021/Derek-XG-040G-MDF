@@ -10,7 +10,7 @@
 # See /LICENSE for more information.
 #
 
-name: an7581 xtl-OpenWrt Builder
+name: an7581 immortalwrt Builder
 
 on:
   repository_dispatch:
@@ -18,8 +18,8 @@ on:
 
 env:
   #REPO_URL: https://github.com/openwrt/openwrt
-  REPO_URL: https://github.com/xiangtailiang/openwrt
-  REPO_BRANCH: main
+  REPO_URL: https://github.com/immortalwrt/immortalwrt
+  REPO_BRANCH: openwrt-25.12
   FEEDS_CONF: feeds.conf.default
   CONFIG_FILE: an7581.config
   DIY_P1_SH: diy-part1.sh
