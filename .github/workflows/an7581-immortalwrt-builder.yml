@@ -21,9 +21,9 @@ env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt
   REPO_BRANCH: openwrt-25.12
   FEEDS_CONF: feeds.conf.default
-  CONFIG_FILE: an7581.config
+  CONFIG_FILE: an7581-immortalwrt.config
   DIY_P1_SH: diy-part1.sh
-  DIY_P2_SH: an7581-diy-part2.sh
+  DIY_P2_SH: an7581-diy-immortalwrt-part2.sh
   UPLOAD_BIN_DIR: false
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
@@ -65,19 +65,6 @@ jobs:
         df -hT $PWD
         git clone $REPO_URL -b $REPO_BRANCH openwrt
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
-    
-    #- name: Install Go 1.26 toolchain
-      #run: |
-        #GO_VER=1.26.5   # 与 feeds 里 golang1.26 接近即可，可按需改
-        #curl -fsSL "https://go.dev/dl/go${GO_VER}.linux-amd64.tar.gz" -o /tmp/go.tgz
-        #sudo rm -rf /usr/local/go
-        #sudo tar -C /usr/local -xzf /tmp/go.tgz
-        #echo "/usr/local/go/bin" >> $GITHUB_PATH
-        #export PATH="/usr/local/go/bin:$PATH"
-        #go version
-        # 确认是完整 GOROOT（要有 bin/go）
-        #test -x /usr/local/go/bin/go
-        #ls /usr/local/go/bin/go
         
     # 1. 必须先用 apt 安装系统级的 ccache 工具！
     - name: Install Ccache host tool
@@ -119,7 +106,7 @@ jobs:
     - name: Init Ccache Config
       run: |
         mkdir -p ~/.ccache
-        ccache -M 10G
+        ccache -M 5G
         ccache -o compression=true
         ccache -z
     
@@ -159,123 +146,10 @@ jobs:
         # 启用 ccache
         echo "CONFIG_CCACHE=y" >> .config
     
-        # =========================================================
-        # Go 配置：使用 OpenWrt 内部 Go（不依赖外部）
-        # =========================================================
-        echo ">>> 配置使用 OpenWrt 内部 Go..."
-    
-        # 确保不使用外部 Go
-        sed -i '/CONFIG_USE_EXTERNAL_HOST_GOLANG/d' .config
-        echo "# CONFIG_USE_EXTERNAL_HOST_GOLANG is not set" >> .config
-    
-        # 确保不设置外部 Go 路径
-        sed -i '/CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT/d' .config
-        echo "# CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT is not set" >> .config
-    
-        # 启用内部 Go 编译（bootstrap）
-        sed -i '/CONFIG_GOLANG_BUILD_BOOTSTRAP/d' .config
-        echo "CONFIG_GOLANG_BUILD_BOOTSTRAP=y" >> .config
-    
-        # =========================================================
-        # Rust 配置：禁用外部 Rust，禁用 SS-Rust
-        # =========================================================
-        echo ">>> 禁用 Rust 相关..."
-        sed -i '/CONFIG_USE_EXTERNAL_HOST_RUST/d' .config
-        echo "# CONFIG_USE_EXTERNAL_HOST_RUST is not set" >> .config
-    
-        # =========================================================
-        # 强制选中需要的包
-        # =========================================================
-        for pkg in \
-          airoha-en7581-npu-firmware \
-          luci-app-airoha-npu \
-          luci-i18n-airoha-npu-zh-cn \
-          vlmcsd \
-          luci-app-vlmcsd \
-          luci-i18n-vlmcsd-zh-cn
-        do
-          sed -i "s/# CONFIG_PACKAGE_${pkg} is not set/CONFIG_PACKAGE_${pkg}=y/" .config 2>/dev/null || true
-          grep -q "CONFIG_PACKAGE_${pkg}=y" .config || echo "CONFIG_PACKAGE_${pkg}=y" >> .config
-        done
-    
-        # =========================================================
-        # 生成配置
-        # =========================================================
-        make defconfig
-    
-        # =========================================================
-        # 强制关闭 SS-Rust（defconfig 可能会重新选中）
-        # =========================================================
-        for opt in \
-          luci-app-passwall2_INCLUDE_Shadowsocks_Rust_Client \
-          luci-app-passwall2_INCLUDE_Shadowsocks_Rust_Server \
-          shadowsocks-rust-sslocal \
-          shadowsocks-rust-ssserver \
-          shadowsocks-rust-ssmanager \
-          shadowsocks-rust-ssurl \
-          shadowsocks-rust-ssservice
-        do
-          sed -i "/CONFIG_PACKAGE_${opt}/d" .config
-          echo "# CONFIG_PACKAGE_${opt} is not set" >> .config
-        done
-    
-        # 再次 defconfig 确认
-        make defconfig
-    
-        # 再次关闭可能被重新选中的 SS-Rust
-        for opt in \
-          luci-app-passwall2_INCLUDE_Shadowsocks_Rust_Client \
-          luci-app-passwall2_INCLUDE_Shadowsocks_Rust_Server \
-          shadowsocks-rust-sslocal \
-          shadowsocks-rust-ssserver \
-          shadowsocks-rust-ssmanager \
-          shadowsocks-rust-ssurl \
-          shadowsocks-rust-ssservice
-        do
-          sed -i "/CONFIG_PACKAGE_${opt}/d" .config
-          echo "# CONFIG_PACKAGE_${opt} is not set" >> .config
-        done
-    
-        # =========================================================
-        # 诊断输出
-        # =========================================================
-        echo "========== Go 配置确认 =========="
-        grep -E 'GOLANG_EXTERNAL_BOOTSTRAP|GOLANG_BUILD_BOOTSTRAP|USE_EXTERNAL_HOST_GOLANG' .config || true
-    
-        echo "========== Rust / SS-Rust 诊断 =========="
-        grep -E 'Shadowsocks_Rust|shadowsocks-rust|EXTERNAL_HOST_RUST|PACKAGE_rust' .config || true
-    
-        # =========================================================
-        # 下载源码
-        # =========================================================
         make download -j8
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
         
-    - name: Debug Check Custom Changes
-      run: |
-        cd openwrt
-    
-        echo "========== 1. .config 关键包是否选中 =========="
-        grep -E "CONFIG_PACKAGE_(airoha-en7581-npu-firmware|luci-app-airoha-npu|luci-i18n-airoha-npu|vlmcsd|luci-app-vlmcsd)=y" .config || echo "⚠️ 以上包有缺失"
-    
-        echo ""
-        echo "========== 2. package/ 目录是否有 luci-app-airoha-npu =========="
-        if [ -d "package/luci-app-airoha-npu" ]; then
-          echo "✔ package/luci-app-airoha-npu 存在"
-          ls package/luci-app-airoha-npu/
-        else
-          echo "❌ package/luci-app-airoha-npu 不存在！clone 失败"
-        fi
-    
-        echo ""
-        echo "========== 3. feeds 里是否有 vlmcsd =========="
-        find feeds -type d -name "*vlmcsd*" 2>/dev/null || echo "❌ feeds 里找不到 vlmcsd"
-    
-        echo ""
-        echo "========== 4. 最终确认关键 CONFIG 行 =========="
-        grep -n "airoha-npu\|vlmcsd\|airoha-en7581-npu" .config || true
-
     - name: Compile the firmware
       id: compile
       run: |
